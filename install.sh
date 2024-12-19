@@ -31,6 +31,20 @@ else
     exit 1
 fi
 
+# دانلود فایل‌های مربوط به ربات
+echo "در حال دانلود فایل‌های ربات..."
+mkdir -p /opt/outline_bot
+cd /opt/outline_bot
+
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/outline_bot.py
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/delete_user.py
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/users_data.json
+
+# اطمینان از مجوز اجرای فایل‌های دانلود شده
+chmod +x /opt/outline_bot/*.py
+echo "فایل‌های ربات با موفقیت دانلود و آماده شدند."
+
+
 # استخراج مقادیر certSha256 و apiUrl از فایل access.txt
 CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
 OUTLINE_API_URL=$(grep "apiUrl:" /opt/outline/access.txt | awk -F'apiUrl:' '{print $2}')
