@@ -1,7 +1,9 @@
 import logging
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 import requests
+from threading import Timer
 import json
+from pytz import timezone
 from datetime import datetime, timedelta
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
@@ -56,10 +58,66 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
         ["🆕 ایجاد کاربر", "👥 مشاهده کاربران"],
         ["❌ حذف کاربر", "💬 درخواست پشتیبانی"],
-        ["🔄 دریافت آخرین آپدیت"],
+        ["🔄 دریافت آخرین آپدیت", "🎯 دریافت اکانت تست"]
     ],
     resize_keyboard=True,
 )
+
+# هندلر دریافت اکانت تست
+async def create_test_account(update: Update, context: CallbackContext):
+    user = update.effective_user
+    if not is_admin(update):
+        await update.message.reply_text("شما مجاز به استفاده از این بخش نیستید.")
+        return
+
+    test_user_name = f"Test-{user.id}"
+    expiry_date = datetime.now() + timedelta(hours=1)  # تغییر به 1 ساعت
+
+    try:
+        # ایجاد کاربر تست در Outline
+        response = requests.post(
+            f"{OUTLINE_API_URL}/access-keys",
+            headers={"Authorization": f"Bearer {OUTLINE_API_KEY}"},
+            json={"name": test_user_name},
+            verify=False,
+        )
+
+        if response.status_code in [200, 201]:
+            data = response.json()
+            user_id = data["id"]
+
+            # ذخیره اطلاعات کاربر تست در فایل JSON
+            user_data = load_user_data()
+            user_data["users"][str(user_id)] = {
+                "name": test_user_name,
+                "expiry_date": expiry_date.strftime("%Y-%m-%d %H:%M:%S"),
+                "accessUrl": data["accessUrl"],
+            }
+            save_user_data(user_data)
+
+            # ارسال پیام موفقیت
+            message = (
+                f"اکانت تست با موفقیت ایجاد شد! 🎉\n\n"
+                f"Name: {test_user_name}\n"
+                f"زمان انقضا: {expiry_date.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                f"لینک اتصال:\n"
+                f"{data['accessUrl']}"
+            )
+            await update.message.reply_text(message)
+        else:
+            logger.error(f"خطا در ایجاد اکانت تست: {response.status_code} {response.text}")
+            await update.message.reply_text("خطا در ایجاد اکانت تست!")
+    except Exception as e:
+        logger.error(f"Exception in create_test_account: {str(e)}")
+        await update.message.reply_text("خطای غیرمنتظره در ایجاد اکانت تست!")
+
+    await update.message.reply_text("به منوی اصلی بازگشتید.", reply_markup=MAIN_KEYBOARD)
+
+
+def schedule_user_cleanup():
+    remove_expired_users()
+    Timer(60, schedule_user_cleanup).start()  # اجرای هر 60 ثانیه
+
 
 # هندلر دریافت آخرین آپدیت
 async def check_for_update(update: Update, context: CallbackContext):
@@ -119,12 +177,13 @@ def save_user_data(data):
 # بررسی کاربران منقضی‌شده
 def check_expired_users():
     user_data = load_user_data()["users"]
-    today = datetime.now().date()
+    now = datetime.now()
     expired_users = [
         user_id for user_id, details in user_data.items()
-        if datetime.strptime(details["expiry_date"], "%Y-%m-%d").date() < today
+        if datetime.strptime(details["expiry_date"], "%Y-%m-%d %H:%M:%S") < now
     ]
     return expired_users
+
 
 def remove_expired_users():
     expired_users = check_expired_users()
@@ -272,7 +331,7 @@ async def list_users(update: Update, context: CallbackContext):
                 logger.warning(f"Invalid data for user ID {user_id}: {details}")
                 continue
 
-            expiry_date = datetime.strptime(details["expiry_date"], "%Y-%m-%d").date()
+            expiry_date = datetime.strptime(details["expiry_date"], "%Y-%m-%d %H:%M:%S").date()
             status = "✅ فعال" if expiry_date >= today else "❌ منقضی‌شده"
             message += (
                 f"ID: {user_id}\n"
@@ -364,6 +423,8 @@ def main():
     # اضافه کردن هندلر جدید برای درخواست پشتیبانی
     application.add_handler(MessageHandler(filters.Regex("^💬 درخواست پشتیبانی$"), support_request))
     application.add_handler(MessageHandler(filters.Regex("^🔄 دریافت آخرین آپدیت$"), check_for_update))
+    application.add_handler(MessageHandler(filters.Regex("^🎯 دریافت اکانت تست$"), create_test_account))
+
 
     # هندلرهای اصلی
     application.add_handler(CommandHandler("start", start))
@@ -373,6 +434,8 @@ def main():
 
     # حذف کاربران منقضی‌شده
     remove_expired_users()
+
+    schedule_user_cleanup()
 
     logger.info("Bot is starting...")
     application.run_polling()
