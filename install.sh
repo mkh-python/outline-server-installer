@@ -23,9 +23,16 @@ source outline_env/bin/activate
 echo "در حال دانلود فایل‌های مربوط به ربات..."
 mkdir -p /opt/outline_bot
 cd /opt/outline_bot
+
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/outline_bot.py
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/delete_user.py
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/users_data.json
+
+# بررسی دانلود فایل‌ها
+if [ ! -f "outline_bot.py" ] || [ ! -f "delete_user.py" ] || [ ! -f "users_data.json" ]; then
+    echo "خطا در دانلود فایل‌های ربات. لطفاً اتصال اینترنت را بررسی کنید."
+    exit 1
+fi
 
 # اطمینان از مجوز اجرای فایل‌ها
 chmod +x *.py
@@ -41,12 +48,6 @@ else
     echo "خطا در نصب سرور Outline."
     exit 1
 fi
-
-
-# اطمینان از مجوز اجرای فایل‌های دانلود شده
-chmod +x /opt/outline_bot/*.py
-echo "فایل‌های ربات با موفقیت دانلود و آماده شدند."
-
 
 # استخراج مقادیر certSha256 و apiUrl از فایل access.txt
 CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
@@ -69,13 +70,13 @@ echo "OUTLINE_API_KEY: $OUTLINE_API_KEY"
 
 # به‌روزرسانی فایل outline_bot.py
 echo "در حال به‌روزرسانی فایل outline_bot.py..."
-sed -i "s|OUTLINE_API_URL = .*|OUTLINE_API_URL = \"$OUTLINE_API_URL\"|" outline_bot.py
-sed -i "s|OUTLINE_API_KEY = .*|OUTLINE_API_KEY = \"$OUTLINE_API_KEY\"|" outline_bot.py
-sed -i "s|CERT_SHA256 = .*|CERT_SHA256 = \"$CERT_SHA256\"|" outline_bot.py
+sed -i "s|OUTLINE_API_URL = .*|OUTLINE_API_URL = \"$OUTLINE_API_URL\"|" /opt/outline_bot/outline_bot.py
+sed -i "s|OUTLINE_API_KEY = .*|OUTLINE_API_KEY = \"$OUTLINE_API_KEY\"|" /opt/outline_bot/outline_bot.py
+sed -i "s|CERT_SHA256 = .*|CERT_SHA256 = \"$CERT_SHA256\"|" /opt/outline_bot/outline_bot.py
 
 # دریافت توکن تلگرام
 read -p "لطفاً توکن ربات تلگرام را وارد کنید: " BOT_TOKEN
-sed -i "s|BOT_TOKEN = .*|BOT_TOKEN = \"$BOT_TOKEN\"|" outline_bot.py
+sed -i "s|BOT_TOKEN = .*|BOT_TOKEN = \"$BOT_TOKEN\"|" /opt/outline_bot/outline_bot.py
 
 # دریافت آیدی مدیران
 ADMIN_IDS=()
@@ -100,7 +101,7 @@ else
 fi
 
 # جایگزینی متغیر ADMIN_IDS در فایل outline_bot.py
-sed -i "s|ADMIN_IDS = .*|ADMIN_IDS = ${ADMIN_IDS_STR}|" outline_bot.py
+sed -i "s|ADMIN_IDS = .*|ADMIN_IDS = ${ADMIN_IDS_STR}|" /opt/outline_bot/outline_bot.py
 
 # ارسال پیام خوش‌آمدگویی به تلگرام
 echo -e "${CYAN}Sending welcome message to the user...${RESET}"
@@ -116,7 +117,6 @@ API URL from Outline Server:
 {\"apiUrl\":\"$OUTLINE_API_URL\",\"certSha256\":\"$CERT_SHA256\"}
 
 🚀 لطفاً مقادیر بالا را در Outline Manager وارد کنید تا به سرور متصل شوید🚀
-
 
 🡇 لینک دانلود همه سیستم‌عامل‌ها برای مدیریت سرور و کاربران🡇
 
@@ -139,16 +139,13 @@ https://s3.amazonaws.com/outline-releases/manager/linux/stable/Outline-Manager.A
 pip install --upgrade pip
 pip install requests python-telegram-bot
 
-# نصب گواهی‌های SSL در صورت نیاز
-sudo apt install -y ca-certificates
-
 # ساخت فایل log برای ذخیره لاگ‌ها
 mkdir -p logs
 touch logs/bot.log
 
 # اطمینان از دسترسی فایل JSON
-if [ ! -f users_data.json ]; then
-    echo '{"next_id": 1, "users": {}}' > users_data.json
+if [ ! -f /opt/outline_bot/users_data.json ]; then
+    echo '{"next_id": 1, "users": {}}' > /opt/outline_bot/users_data.json
 fi
 
 # ایجاد سرویس Systemd برای اجرای خودکار ربات
@@ -161,8 +158,8 @@ After=network.target
 
 [Service]
 User=$USER
-WorkingDirectory=$(pwd)
-ExecStart=$(pwd)/outline_env/bin/python3 $(pwd)/outline_bot.py
+WorkingDirectory=/opt/outline_bot
+ExecStart=$(pwd)/outline_env/bin/python3 /opt/outline_bot/outline_bot.py
 Restart=always
 
 [Install]
