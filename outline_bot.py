@@ -1,4 +1,6 @@
 import logging
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+
 import requests
 import json
 from datetime import datetime, timedelta
@@ -13,9 +15,9 @@ from telegram.ext import (
 )
 
 # تنظیمات سرور Outline
-OUTLINE_API_URL = ""
-OUTLINE_API_KEY = ""
-CERT_SHA256 = ""
+OUTLINE_API_URL = "https://135.181.146.198:63910/jdTpo2-adll3al4hGC0VWA"
+OUTLINE_API_KEY = "jdTpo2-adll3al4hGC0VWA"
+CERT_SHA256 = "C3F2504EA3BD73B3B777E418BB20A39C89E8ABD341F2EA7FE729F1FE73E11C35"
 DATA_FILE = "/opt/outline_bot/users_data.json"  # مسیر فایل ذخیره اطلاعات کاربران
 
 # تنظیمات لاگ
@@ -34,13 +36,24 @@ GET_USER_ID = 3
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
         ["🆕 ایجاد کاربر", "👥 مشاهده کاربران"],
-        ["❌ حذف کاربر"],
+        ["❌ حذف کاربر", "💬 درخواست پشتیبانی"],
     ],
     resize_keyboard=True,
 )
 
+# دکمه‌های پشتیبانی
+SUPPORT_BUTTON = InlineKeyboardMarkup(
+    [
+        [
+            InlineKeyboardButton(
+                "چت با پشتیبانی", url="https://t.me/irannetwork_co"
+            )
+        ]
+    ]
+)
+
 # آیدی مدیران
-ADMIN_IDS = []
+ADMIN_IDS = [7819156066, 671715232]
 
 
 # مدیریت اطلاعات کاربران
@@ -87,6 +100,7 @@ def remove_expired_users():
                 user_data["users"].pop(user_id, None)
                 save_user_data(user_data)
                 logger.info(f"کاربر منقضی‌شده با شناسه {user_id} حذف شد.")
+
 
 # تابع بررسی دسترسی
 def is_admin(update: Update) -> bool:
@@ -277,9 +291,16 @@ async def confirm_delete_user(update: Update, context: CallbackContext):
 
     return ConversationHandler.END
 
+# هندلر درخواست پشتیبانی
+async def support_request(update: Update, context: CallbackContext):
+    await update.message.reply_text(
+        "برای چت مستقیم با پشتیبانی روی دکمه زیر کلیک کنید:",
+        reply_markup=SUPPORT_BUTTON,
+    )
+
 # راه‌اندازی ربات
 def main():
-    BOT_TOKEN = ""
+    BOT_TOKEN = "7066784879:AAGXV-cpw68qtbxiGxlKjboRQqTgG5gF3f8"
     application = Application.builder().token(BOT_TOKEN).build()
 
     # هندلر ایجاد کاربر
@@ -300,6 +321,11 @@ def main():
         },
         fallbacks=[],
     )
+
+    # اضافه کردن هندلر جدید برای درخواست پشتیبانی
+    application.add_handler(MessageHandler(filters.Regex("^💬 درخواست پشتیبانی$"), support_request))
+
+
 
     # هندلرهای اصلی
     application.add_handler(CommandHandler("start", start))
