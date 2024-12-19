@@ -92,7 +92,6 @@ while true; do
     ADMIN_IDS+=("$ADMIN_ID")
 done
 
-# تبدیل آرایه به رشته
 if [ ${#ADMIN_IDS[@]} -eq 0 ]; then
     ADMIN_IDS_STR="[]"
 else
@@ -140,8 +139,8 @@ pip install --upgrade pip
 pip install requests python-telegram-bot
 
 # ساخت فایل log برای ذخیره لاگ‌ها
-mkdir -p logs
-touch logs/bot.log
+mkdir -p /opt/outline_bot/logs
+touch /opt/outline_bot/logs/bot.log
 
 # اطمینان از دسترسی فایل JSON
 if [ ! -f /opt/outline_bot/users_data.json ]; then
