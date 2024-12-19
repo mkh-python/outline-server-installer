@@ -69,15 +69,19 @@ echo "CERT_SHA256: $CERT_SHA256"
 echo "OUTLINE_API_URL: $OUTLINE_API_URL"
 echo "OUTLINE_API_KEY: $OUTLINE_API_KEY"
 
-# به‌روزرسانی فایل outline_bot.py
-echo "در حال به‌روزرسانی فایل outline_bot.py..."
-sed -i "s|OUTLINE_API_URL = .*|OUTLINE_API_URL = \"$OUTLINE_API_URL\"|" /opt/outline_bot/outline_bot.py
-sed -i "s|OUTLINE_API_KEY = .*|OUTLINE_API_KEY = \"$OUTLINE_API_KEY\"|" /opt/outline_bot/outline_bot.py
-sed -i "s|CERT_SHA256 = .*|CERT_SHA256 = \"$CERT_SHA256\"|" /opt/outline_bot/outline_bot.py
+# ایجاد فایل تنظیمات مخفی
+CONFIG_FILE="/opt/outline_bot/.config.json"
+cat <<EOF > $CONFIG_FILE
+{
+    "OUTLINE_API_URL": "$OUTLINE_API_URL",
+    "OUTLINE_API_KEY": "$OUTLINE_API_KEY",
+    "CERT_SHA256": "$CERT_SHA256"
+}
+EOF
+chmod 600 $CONFIG_FILE
 
 # دریافت توکن تلگرام
 read -p "لطفاً توکن ربات تلگرام را وارد کنید: " BOT_TOKEN
-sed -i "s|BOT_TOKEN = .*|BOT_TOKEN = \"$BOT_TOKEN\"|" /opt/outline_bot/outline_bot.py
 
 # دریافت آیدی مدیران
 ADMIN_IDS=()
@@ -100,8 +104,8 @@ else
     ADMIN_IDS_STR="[${ADMIN_IDS_STR}]"
 fi
 
-# جایگزینی متغیر ADMIN_IDS در فایل outline_bot.py
-sed -i "s|ADMIN_IDS = .*|ADMIN_IDS = ${ADMIN_IDS_STR}|" /opt/outline_bot/outline_bot.py
+# ایجاد تنظیمات تلگرام در فایل پیکربندی
+jq ". + { \"BOT_TOKEN\": \"$BOT_TOKEN\", \"ADMIN_IDS\": $ADMIN_IDS_STR }" $CONFIG_FILE > tmp.$$.json && mv tmp.$$.json $CONFIG_FILE
 
 # ارسال پیام خوش‌آمدگویی به تلگرام
 echo -e "${CYAN}Sending welcome message to the user...${RESET}"
