@@ -19,6 +19,17 @@ python3 -m venv outline_env
 # فعال‌سازی محیط مجازی
 source outline_env/bin/activate
 
+# دانلود فایل‌های ربات
+echo "در حال دانلود فایل‌های مربوط به ربات..."
+mkdir -p /opt/outline_bot
+cd /opt/outline_bot
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/outline_bot.py
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/delete_user.py
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/users_data.json
+
+# اطمینان از مجوز اجرای فایل‌ها
+chmod +x *.py
+
 # نصب سرور Outline
 echo "در حال نصب سرور Outline..."
 sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-apps/master/server_manager/install_scripts/install_server.sh)"
@@ -31,14 +42,6 @@ else
     exit 1
 fi
 
-# دانلود فایل‌های مربوط به ربات
-echo "در حال دانلود فایل‌های ربات..."
-mkdir -p /opt/outline_bot
-cd /opt/outline_bot
-
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/outline_bot.py
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/delete_user.py
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/users_data.json
 
 # اطمینان از مجوز اجرای فایل‌های دانلود شده
 chmod +x /opt/outline_bot/*.py
