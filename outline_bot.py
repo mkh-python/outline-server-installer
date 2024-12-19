@@ -1,6 +1,5 @@
 import logging
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-
 import requests
 import json
 from datetime import datetime, timedelta
@@ -13,11 +12,30 @@ from telegram.ext import (
     ConversationHandler,
     filters,
 )
+import os
 
-# تنظیمات سرور Outline
-OUTLINE_API_URL = "https://135.181.146.198:63910/jdTpo2-adll3al4hGC0VWA"
-OUTLINE_API_KEY = "jdTpo2-adll3al4hGC0VWA"
-CERT_SHA256 = "C3F2504EA3BD73B3B777E418BB20A39C89E8ABD341F2EA7FE729F1FE73E11C35"
+# مسیر فایل تنظیمات
+CONFIG_PATH = "/opt/outline_bot/.config.json"
+
+# بارگذاری تنظیمات از فایل
+def load_config():
+    try:
+        with open(CONFIG_PATH, "r") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        raise Exception(f"فایل تنظیمات یافت نشد: {CONFIG_PATH}")
+    except json.JSONDecodeError:
+        raise Exception("خطا در خواندن فایل تنظیمات JSON.")
+
+# بارگذاری تنظیمات
+config = load_config()
+
+# متغیرهای تنظیمات
+BOT_TOKEN = config["BOT_TOKEN"]
+ADMIN_IDS = config["ADMIN_IDS"]
+OUTLINE_API_URL = config["OUTLINE_API_URL"]
+OUTLINE_API_KEY = config["OUTLINE_API_KEY"]
+CERT_SHA256 = config["CERT_SHA256"]
 DATA_FILE = "/opt/outline_bot/users_data.json"  # مسیر فایل ذخیره اطلاعات کاربران
 
 # تنظیمات لاگ
@@ -32,14 +50,39 @@ GET_USER_NAME = 1
 GET_SUBSCRIPTION_DURATION = 2
 GET_USER_ID = 3
 
-# دکمه‌های ثابت
+BOT_VERSION = "1.37.3"
+
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
         ["🆕 ایجاد کاربر", "👥 مشاهده کاربران"],
         ["❌ حذف کاربر", "💬 درخواست پشتیبانی"],
+        ["🔄 دریافت آخرین آپدیت"],
     ],
     resize_keyboard=True,
 )
+
+# هندلر دریافت آخرین آپدیت
+async def check_for_update(update: Update, context: CallbackContext):
+    GITHUB_VERSION_URL = "https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/version.txt"
+
+    try:
+        response = requests.get(GITHUB_VERSION_URL)
+        if response.status_code == 200:
+            latest_version = response.text.strip()
+            if BOT_VERSION == latest_version:
+                await update.message.reply_text(f"شما در حال استفاده از آخرین نسخه هستید: {BOT_VERSION}")
+            else:
+                await update.message.reply_text(
+                    f"نسخه جدیدی در دسترس است: {latest_version}\n"
+                    "برای دریافت نسخه جدید، لطفاً دستورالعمل‌های زیر را دنبال کنید:\n"
+                    "1. نصب خودکار جدید را دانلود کنید.\n"
+                    "2. نصب را مجدداً انجام دهید."
+                )
+        else:
+            await update.message.reply_text("خطا در بررسی نسخه جدید. لطفاً بعداً دوباره تلاش کنید.")
+    except Exception as e:
+        logger.error(f"خطا در بررسی آپدیت: {e}")
+        await update.message.reply_text("خطای غیرمنتظره در بررسی آپدیت.")
 
 # دکمه‌های پشتیبانی
 SUPPORT_BUTTON = InlineKeyboardMarkup(
@@ -51,9 +94,6 @@ SUPPORT_BUTTON = InlineKeyboardMarkup(
         ]
     ]
 )
-
-# آیدی مدیران
-ADMIN_IDS = [7819156066, 671715232]
 
 
 # مدیریت اطلاعات کاربران
@@ -300,7 +340,6 @@ async def support_request(update: Update, context: CallbackContext):
 
 # راه‌اندازی ربات
 def main():
-    BOT_TOKEN = "7066784879:AAGXV-cpw68qtbxiGxlKjboRQqTgG5gF3f8"
     application = Application.builder().token(BOT_TOKEN).build()
 
     # هندلر ایجاد کاربر
@@ -324,8 +363,7 @@ def main():
 
     # اضافه کردن هندلر جدید برای درخواست پشتیبانی
     application.add_handler(MessageHandler(filters.Regex("^💬 درخواست پشتیبانی$"), support_request))
-
-
+    application.add_handler(MessageHandler(filters.Regex("^🔄 دریافت آخرین آپدیت$"), check_for_update))
 
     # هندلرهای اصلی
     application.add_handler(CommandHandler("start", start))
