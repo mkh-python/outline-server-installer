@@ -1,6 +1,7 @@
 import logging
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 import requests
+import urllib3
 from threading import Timer
 import json
 from pytz import timezone
@@ -15,6 +16,8 @@ from telegram.ext import (
     filters,
 )
 import os
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # مسیر فایل تنظیمات
 CONFIG_PATH = "/opt/outline_bot/.config.json"
@@ -51,6 +54,7 @@ logger = logging.getLogger(__name__)
 GET_USER_NAME = 1
 GET_SUBSCRIPTION_DURATION = 2
 GET_USER_ID = 3
+GET_DATA_LIMIT = 4
 
 BOT_VERSION = "1.37.3"
 
@@ -71,7 +75,8 @@ async def create_test_account(update: Update, context: CallbackContext):
         return
 
     test_user_name = f"Test-{user.id}"
-    expiry_date = datetime.now() + timedelta(hours=1)  # تغییر به 1 ساعت
+    expiry_date = datetime.now() + timedelta(hours=1)  # تنظیم به 1 ساعت
+    data_limit_gb = 1  # محدودیت حجم 1 گیگابایت
 
     try:
         # ایجاد کاربر تست در Outline
@@ -85,13 +90,29 @@ async def create_test_account(update: Update, context: CallbackContext):
         if response.status_code in [200, 201]:
             data = response.json()
             user_id = data["id"]
+            access_url = data["accessUrl"]
+
+            # اعمال محدودیت حجمی
+            limit_bytes = data_limit_gb * 1024**3  # تبدیل گیگابایت به بایت
+            limit_response = requests.put(
+                f"{OUTLINE_API_URL}/access-keys/{user_id}/data-limit",
+                headers={"Authorization": f"Bearer {OUTLINE_API_KEY}"},
+                json={"limit": {"bytes": limit_bytes}},
+                verify=False,
+            )
+
+            if limit_response.status_code == 204:
+                logger.info(f"محدودیت حجمی {data_limit_gb} گیگابایت با موفقیت اعمال شد.")
+            else:
+                logger.warning(f"خطا در اعمال محدودیت حجمی: {limit_response.status_code} {limit_response.text}")
 
             # ذخیره اطلاعات کاربر تست در فایل JSON
             user_data = load_user_data()
             user_data["users"][str(user_id)] = {
                 "name": test_user_name,
                 "expiry_date": expiry_date.strftime("%Y-%m-%d %H:%M:%S"),
-                "accessUrl": data["accessUrl"],
+                "accessUrl": access_url,
+                "data_limit_gb": data_limit_gb,
             }
             save_user_data(user_data)
 
@@ -99,9 +120,9 @@ async def create_test_account(update: Update, context: CallbackContext):
             message = (
                 f"اکانت تست با موفقیت ایجاد شد! 🎉\n\n"
                 f"Name: {test_user_name}\n"
-                f"زمان انقضا: {expiry_date.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                f"لینک اتصال:\n"
-                f"{data['accessUrl']}"
+                f"زمان انقضا: {expiry_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"حجم مصرفی مجاز: {data_limit_gb} گیگابایت\n\n"
+                f"لینک اتصال:\n{access_url}"
             )
             await update.message.reply_text(message)
         else:
@@ -112,6 +133,92 @@ async def create_test_account(update: Update, context: CallbackContext):
         await update.message.reply_text("خطای غیرمنتظره در ایجاد اکانت تست!")
 
     await update.message.reply_text("به منوی اصلی بازگشتید.", reply_markup=MAIN_KEYBOARD)
+
+
+async def ask_for_data_limit(update: Update, context: CallbackContext):
+    duration_text = update.message.text
+    if duration_text == "بازگشت":
+        await update.message.reply_text("عملیات لغو شد. به منوی اصلی بازگشتید.", reply_markup=MAIN_KEYBOARD)
+        return ConversationHandler.END
+
+    if duration_text not in ["1 ماه", "2 ماه", "3 ماه"]:
+        await update.message.reply_text("لطفاً یک گزینه معتبر انتخاب کنید.")
+        return GET_SUBSCRIPTION_DURATION
+
+    # ذخیره مدت زمان اشتراک
+    duration_map = {"1 ماه": 1, "2 ماه": 2, "3 ماه": 3}
+    context.user_data["subscription_months"] = duration_map[duration_text]
+
+    await update.message.reply_text("لطفاً حجم مصرفی مجاز (بر حسب گیگابایت) را وارد کنید:")
+    return GET_DATA_LIMIT
+
+async def create_user_with_limit(update: Update, context: CallbackContext):
+    try:
+        data_limit_gb = update.message.text.strip()
+        if not data_limit_gb.isdigit() or int(data_limit_gb) <= 0:
+            await update.message.reply_text("لطفاً یک عدد معتبر وارد کنید.")
+            return GET_DATA_LIMIT
+
+        context.user_data["data_limit"] = int(data_limit_gb)
+        user_name = context.user_data["user_name"]
+        subscription_months = context.user_data["subscription_months"]
+        expiry_date = datetime.now() + timedelta(days=30 * subscription_months)
+
+        # ایجاد کاربر در Outline
+        response = requests.post(
+            f"{OUTLINE_API_URL}/access-keys",
+            headers={"Authorization": f"Bearer {OUTLINE_API_KEY}"},
+            json={"name": user_name},
+            verify=False,
+        )
+
+        if response.status_code in [200, 201]:
+            data = response.json()
+            user_id = data["id"]
+            access_url = data["accessUrl"]
+
+            # اعمال محدودیت حجمی
+            limit_bytes = context.user_data["data_limit"] * 1024**3  # تبدیل گیگابایت به بایت
+            limit_response = requests.put(
+                f"{OUTLINE_API_URL}/access-keys/{user_id}/data-limit",
+                headers={"Authorization": f"Bearer {OUTLINE_API_KEY}"},
+                json={"limit": {"bytes": limit_bytes}},
+                verify=False,
+            )
+
+            if limit_response.status_code == 204:
+                logger.info(f"محدودیت حجمی {context.user_data['data_limit']} گیگابایت با موفقیت اعمال شد.")
+            else:
+                logger.warning(f"خطا در اعمال محدودیت حجمی: {limit_response.status_code} {limit_response.text}")
+
+            # ذخیره اطلاعات کاربر
+            user_data = load_user_data()
+            user_data["users"][str(user_id)] = {
+                "name": user_name,
+                "expiry_date": expiry_date.strftime("%Y-%m-%d"),
+                "accessUrl": access_url,
+                "data_limit_gb": context.user_data["data_limit"],
+            }
+            save_user_data(user_data)
+
+            # پیام موفقیت
+            message = (
+                f"کاربر جدید ایجاد شد! 🎉\n\n"
+                f"نام: {user_name}\n"
+                f"تاریخ انقضا: {expiry_date.strftime('%Y-%m-%d')}\n"
+                f"حجم مصرفی مجاز: {context.user_data['data_limit']} گیگابایت\n\n"
+                f"لینک اتصال:\n{access_url}"
+            )
+            await update.message.reply_text(message, reply_markup=MAIN_KEYBOARD)
+        else:
+            logger.error(f"خطا در ایجاد کاربر: {response.status_code} {response.text}")
+            await update.message.reply_text("خطا در ایجاد کاربر!")
+    except Exception as e:
+        logger.error(f"Exception in create_user_with_limit: {str(e)}")
+        await update.message.reply_text("خطای غیرمنتظره در ایجاد کاربر!")
+
+    return ConversationHandler.END
+
 
 
 def schedule_user_cleanup():
@@ -178,11 +285,28 @@ def save_user_data(data):
 def check_expired_users():
     user_data = load_user_data()["users"]
     now = datetime.now()
-    expired_users = [
-        user_id for user_id, details in user_data.items()
-        if datetime.strptime(details["expiry_date"], "%Y-%m-%d %H:%M:%S") < now
-    ]
+
+    expired_users = []
+    for user_id, details in user_data.items():
+        expiry_date_str = details["expiry_date"]
+
+        try:
+            # بررسی فرمت تاریخ
+            if " " in expiry_date_str:  # اگر تاریخ شامل زمان باشد
+                expiry_date = datetime.strptime(expiry_date_str, "%Y-%m-%d %H:%M:%S")
+            else:  # در غیر این صورت، زمان پیش‌فرض اضافه شود
+                expiry_date = datetime.strptime(expiry_date_str, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59
+                )
+
+            # بررسی تاریخ انقضا
+            if expiry_date < now:
+                expired_users.append(user_id)
+        except ValueError as e:
+            logger.error(f"خطای فرمت تاریخ برای کاربر {user_id}: {e}")
+
     return expired_users
+
 
 
 def remove_expired_users():
@@ -316,6 +440,14 @@ async def create_user(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 # مشاهده کاربران
+def parse_date(date_str):
+    try:
+        # تلاش برای تبدیل با زمان
+        return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        # تلاش برای تبدیل بدون زمان
+        return datetime.strptime(date_str, "%Y-%m-%d")
+
 async def list_users(update: Update, context: CallbackContext):
     if not is_admin(update):
         await update.message.reply_text("شما مجاز به استفاده از این ربات نیستید.")
@@ -331,7 +463,7 @@ async def list_users(update: Update, context: CallbackContext):
                 logger.warning(f"Invalid data for user ID {user_id}: {details}")
                 continue
 
-            expiry_date = datetime.strptime(details["expiry_date"], "%Y-%m-%d %H:%M:%S").date()
+            expiry_date = parse_date(details["expiry_date"]).date()
             status = "✅ فعال" if expiry_date >= today else "❌ منقضی‌شده"
             message += (
                 f"ID: {user_id}\n"
@@ -406,7 +538,8 @@ def main():
         entry_points=[MessageHandler(filters.Regex("^🆕 ایجاد کاربر$"), ask_for_user_name)],
         states={
             GET_USER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_for_subscription_duration)],
-            GET_SUBSCRIPTION_DURATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, create_user)],
+            GET_SUBSCRIPTION_DURATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_for_data_limit)],
+            GET_DATA_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, create_user_with_limit)],
         },
         fallbacks=[],
     )
@@ -425,7 +558,6 @@ def main():
     application.add_handler(MessageHandler(filters.Regex("^🔄 دریافت آخرین آپدیت$"), check_for_update))
     application.add_handler(MessageHandler(filters.Regex("^🎯 دریافت اکانت تست$"), create_test_account))
 
-
     # هندلرهای اصلی
     application.add_handler(CommandHandler("start", start))
     application.add_handler(create_user_handler)
@@ -435,6 +567,7 @@ def main():
     # حذف کاربران منقضی‌شده
     remove_expired_users()
 
+    # زمان‌بندی پاکسازی کاربران منقضی‌شده
     schedule_user_cleanup()
 
     logger.info("Bot is starting...")
