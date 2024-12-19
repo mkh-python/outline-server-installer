@@ -16,7 +16,7 @@ from telegram.ext import (
 OUTLINE_API_URL = ""
 OUTLINE_API_KEY = ""
 CERT_SHA256 = ""
-DATA_FILE = "users_data.json"  # فایل ذخیره اطلاعات کاربران
+DATA_FILE = "/opt/outline_bot/users_data.json"  # مسیر فایل ذخیره اطلاعات کاربران
 
 # تنظیمات لاگ
 logging.basicConfig(
