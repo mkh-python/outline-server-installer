@@ -14,10 +14,11 @@ sudo systemctl enable docker
 
 # ایجاد محیط مجازی پایتون
 echo "ایجاد محیط مجازی..."
-python3 -m venv outline_env
+mkdir -p /opt/outline_bot/outline_env
+python3 -m venv /opt/outline_bot/outline_env
 
 # فعال‌سازی محیط مجازی
-source outline_env/bin/activate
+source /opt/outline_bot/outline_env/bin/activate
 
 # دانلود فایل‌های ربات
 echo "در حال دانلود فایل‌های مربوط به ربات..."
@@ -158,7 +159,7 @@ After=network.target
 [Service]
 User=$USER
 WorkingDirectory=/opt/outline_bot
-ExecStart=$(pwd)/outline_env/bin/python3 /opt/outline_bot/outline_bot.py
+ExecStart=/opt/outline_bot/outline_env/bin/python3 /opt/outline_bot/outline_bot.py
 Restart=always
 
 [Install]
