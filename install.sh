@@ -6,6 +6,19 @@
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y python3 python3-pip python3-venv curl jq
 
+# نصب Docker
+echo "در حال نصب Docker..."
+sudo apt install -y docker.io
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# ایجاد محیط مجازی پایتون
+echo "ایجاد محیط مجازی..."
+python3 -m venv outline_env
+
+# فعال‌سازی محیط مجازی
+source outline_env/bin/activate
+
 # نصب سرور Outline
 echo "در حال نصب سرور Outline..."
 sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-apps/master/server_manager/install_scripts/install_server.sh)"
@@ -65,14 +78,12 @@ done
 if [ ${#ADMIN_IDS[@]} -eq 0 ]; then
     ADMIN_IDS_STR="[]"
 else
-    # استفاده از printf برای تبدیل آرایه به رشته با کاما و فاصله
     ADMIN_IDS_STR=$(printf "%s, " "${ADMIN_IDS[@]}" | sed 's/, $//')
     ADMIN_IDS_STR="[${ADMIN_IDS_STR}]"
 fi
 
 # جایگزینی متغیر ADMIN_IDS در فایل outline_bot.py
 sed -i "s|ADMIN_IDS = .*|ADMIN_IDS = ${ADMIN_IDS_STR}|" outline_bot.py
-
 
 # ارسال پیام خوش‌آمدگویی به تلگرام
 echo -e "${CYAN}Sending welcome message to the user...${RESET}"
@@ -85,7 +96,7 @@ curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
 
 API URL from Outline Server:
 
-{"apiUrl":"$OUTLINE_API_URL","certSha256":"$CERT_SHA256"}
+{\"apiUrl\":\"$OUTLINE_API_URL\",\"certSha256\":\"$CERT_SHA256\"}
 
 🚀 لطفاً مقادیر بالا را در Outline Manager وارد کنید تا به سرور متصل شوید🚀
 
@@ -106,13 +117,6 @@ https://s3.amazonaws.com/outline-releases/manager/linux/stable/Outline-Manager.A
 با تشکر از نصب شما! لطفاً حمایت ما را فراموش نکنید.
 آیدی پشتیبانی 24 ساعته ربات ما:
 @irannetwork_co"
-
-
-# ایجاد محیط مجازی پایتون
-python3 -m venv outline_env
-
-# فعال‌سازی محیط مجازی
-source outline_env/bin/activate
 
 # نصب کتابخانه‌های پایتون موردنیاز
 pip install --upgrade pip
