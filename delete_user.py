@@ -31,6 +31,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger("delete_user")
 
+def check_expired_users():
+    user_data = load_user_data()["users"]
+    now = datetime.now()
+    expired_users = [
+        user_id for user_id, details in user_data.items()
+        if datetime.strptime(details["expiry_date"], "%Y-%m-%d %H:%M:%S") < now
+    ]
+    return expired_users
+
+
 # مدیریت اطلاعات کاربران
 def load_user_data():
     try:
