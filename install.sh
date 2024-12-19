@@ -148,6 +148,10 @@ if [ ! -f /opt/outline_bot/users_data.json ]; then
     echo '{"next_id": 1, "users": {}}' > /opt/outline_bot/users_data.json
 fi
 
+# تنظیم cron job برای حذف کاربران منقضی‌شده
+echo "تنظیم Cron برای حذف کاربران منقضی‌شده..."
+(crontab -l 2>/dev/null; echo "0 0 * * * /opt/outline_bot/outline_env/bin/python3 /opt/outline_bot/delete_user.py") | crontab -
+
 # ایجاد سرویس Systemd برای اجرای خودکار ربات
 SERVICE_FILE="/etc/systemd/system/outline_bot.service"
 
