@@ -2,20 +2,27 @@ import logging
 import json
 from datetime import datetime
 import requests
-from importlib.util import spec_from_file_location, module_from_spec
 
-# مسیر فایل اصلی
-OUTLINE_BOT_PATH = "/opt/outline_bot/outline_bot.py"
+# مسیر فایل تنظیمات
+CONFIG_PATH = "/opt/outline_bot/.config.json"
 
-# بارگذاری فایل اصلی برای دسترسی به متغیرها
-spec = spec_from_file_location("outline_bot", OUTLINE_BOT_PATH)
-outline_bot = module_from_spec(spec)
-spec.loader.exec_module(outline_bot)
+# بارگذاری تنظیمات از فایل
+def load_config():
+    try:
+        with open(CONFIG_PATH, "r") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        raise Exception(f"فایل تنظیمات یافت نشد: {CONFIG_PATH}")
+    except json.JSONDecodeError:
+        raise Exception("خطا در خواندن فایل تنظیمات JSON.")
 
-# تنظیمات سرور Outline از فایل اصلی
-OUTLINE_API_URL = outline_bot.OUTLINE_API_URL
-OUTLINE_API_KEY = outline_bot.OUTLINE_API_KEY
-DATA_FILE = outline_bot.DATA_FILE
+# بارگذاری تنظیمات
+config = load_config()
+
+# متغیرهای تنظیمات
+OUTLINE_API_URL = config["OUTLINE_API_URL"]
+OUTLINE_API_KEY = config["OUTLINE_API_KEY"]
+DATA_FILE = config["DATA_FILE"]
 
 # تنظیمات لاگ
 logging.basicConfig(
