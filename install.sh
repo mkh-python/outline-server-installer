@@ -141,8 +141,8 @@ https://s3.amazonaws.com/outline-releases/manager/linux/stable/Outline-Manager.A
 
 # نصب کتابخانه‌های پایتون موردنیاز
 pip install --upgrade pip
-pip install requests python-telegram-bot pytz
-
+pip install requests python-telegram-bot
+pip install pytz
 
 # ساخت فایل log برای ذخیره لاگ‌ها
 mkdir -p /opt/outline_bot/logs
