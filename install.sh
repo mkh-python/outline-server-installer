@@ -175,6 +175,7 @@ WantedBy=multi-user.target
 EOL
 
 # بارگذاری و فعال‌سازی سرویس
+sudo timedatectl set-timezone Asia/Tehran
 sudo systemctl daemon-reload
 sudo systemctl enable outline_bot.service
 sudo systemctl start outline_bot.service
