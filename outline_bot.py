@@ -111,10 +111,9 @@ async def create_test_account(update: Update, context: CallbackContext):
             user_data = load_user_data()
             user_data["users"][str(user_id)] = {
                 "name": test_user_name,
-                "expiry_date": expiry_date.strftime("%Y-%m-%d"),
-                "accessUrl": data["accessUrl"],
-                "data_limit_gb": data_limit,
-                "data_used_gb": 0  # مقدار پیش‌فرض
+                "expiry_date": expiry_date.strftime("%Y-%m-%d %H:%M:%S"),
+                "accessUrl": access_url,
+                "data_limit_gb": data_limit_gb,
             }
             save_user_data(user_data)
 
