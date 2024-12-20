@@ -4,6 +4,15 @@ This repository contains an automated script to install and configure the Outlin
 
 ---
 
+## What's New?
+
+### Version 1.37.3.4
+- Enhanced user data management: Added data usage limits and tracking.
+- Improved update process: Automatically checks and installs updates from GitHub.
+- Bug fixes and performance improvements.
+
+---
+
 ## Features
 
 - **Full Outline Server Installation**: Automatically installs the Outline Server using the official Outline Manager script.
@@ -51,6 +60,18 @@ The script will:
 
 ---
 
+## Updating the Bot and Server
+
+1. Open your bot in Telegram and click "🔄 Get Latest Update."
+2. The bot will automatically:
+   - Check for new versions on GitHub.
+   - Download and apply updates.
+   - Restart the bot service.
+
+3. Upon successful update, you will receive a confirmation message with the new version.
+
+---
+
 ## Server Details
 
 Upon successful installation, the bot will send the following details to the admin:
@@ -79,6 +100,29 @@ Upon successful installation, the bot will send the following details to the adm
 
 3. **System Service Setup**:
    Configures a systemd service (`outline_bot.service`) to run the bot persistently.
+
+---
+
+## Troubleshooting
+
+### Issue: Bot Service Fails to Start
+**Solution**:
+1. Check the logs:
+   ```bash
+   journalctl -u outline_bot.service -n 50
+   ```
+2. Ensure all dependencies are installed:
+   ```bash
+   pip install -r /opt/outline_bot/requirements.txt
+   ```
+
+### Issue: Update Process Fails
+**Solution**:
+1. Run the update script manually:
+   ```bash
+   sudo bash /opt/outline_bot/update.sh
+   ```
+2. Check for errors in `/opt/outline_bot/update.log`.
 
 ---
 
@@ -130,4 +174,3 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 ## Contributions
 
 Contributions are welcome! Feel free to submit issues or pull requests to improve this repository.
-
