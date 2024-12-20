@@ -113,6 +113,7 @@ async def create_test_account(update: Update, context: CallbackContext):
                 "expiry_date": expiry_date.strftime("%Y-%m-%d %H:%M:%S"),
                 "accessUrl": access_url,
                 "data_limit_gb": data_limit_gb,
+                "data_used_gb": 0,  # مقدار اولیه حجم مصرف‌شده
             }
             save_user_data(user_data)
 
@@ -121,7 +122,8 @@ async def create_test_account(update: Update, context: CallbackContext):
                 f"اکانت تست با موفقیت ایجاد شد! 🎉\n\n"
                 f"Name: {test_user_name}\n"
                 f"زمان انقضا: {expiry_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"حجم مصرفی مجاز: {data_limit_gb} گیگابایت\n\n"
+                f"حجم مصرفی مجاز: {data_limit_gb} گیگابایت\n"
+                f"حجم مصرف‌شده: 0 گیگابایت\n\n"
                 f"لینک اتصال:\n{access_url}"
             )
             await update.message.reply_text(message)
@@ -133,6 +135,7 @@ async def create_test_account(update: Update, context: CallbackContext):
         await update.message.reply_text("خطای غیرمنتظره در ایجاد اکانت تست!")
 
     await update.message.reply_text("به منوی اصلی بازگشتید.", reply_markup=MAIN_KEYBOARD)
+
 
 
 async def ask_for_data_limit(update: Update, context: CallbackContext):
@@ -228,64 +231,26 @@ def schedule_user_cleanup():
 
 # هندلر دریافت آخرین آپدیت
 async def check_for_update(update: Update, context: CallbackContext):
-    user = update.effective_user
-    if not is_admin(update):
-        await update.message.reply_text("❌ شما مجاز به استفاده از این بخش نیستید.")
-        return
-
     GITHUB_VERSION_URL = "https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/version.txt"
-    LOCAL_UPDATE_SCRIPT = "/opt/outline_bot/update.sh"
 
     try:
-        # دریافت نسخه جدید از گیت‌هاب
         response = requests.get(GITHUB_VERSION_URL)
         if response.status_code == 200:
             latest_version = response.text.strip()
-            
-            # اگر نسخه فعلی و جدید برابر هستند
             if BOT_VERSION == latest_version:
-                await update.message.reply_text(
-                    f"🎉 نسخه ربات شما: **{BOT_VERSION}**\n"
-                    "✅ شما از آخرین نسخه استفاده می‌کنید!\n"
-                    "هیچ به‌روزرسانی جدیدی در دسترس نیست.\n\n"
-                    "💻 از اینکه با ما همراه هستید، سپاسگزاریم! 🌟"
-                )
+                await update.message.reply_text(f"شما در حال استفاده از آخرین نسخه هستید: {BOT_VERSION}")
             else:
-                # اطلاع‌رسانی به کاربر برای آغاز فرآیند به‌روزرسانی
                 await update.message.reply_text(
-                    f"🔔 نسخه جدیدی در دسترس است! 🌟\n\n"
-                    f"نسخه فعلی شما: **{BOT_VERSION}**\n"
-                    f"نسخه جدید: **{latest_version}**\n\n"
-                    "⏳ فرآیند به‌روزرسانی به‌زودی آغاز می‌شود...\n"
-                    "لطفاً صبور باشید. 🛠️"
+                    f"نسخه جدیدی در دسترس است: {latest_version}\n"
+                    "برای دریافت نسخه جدید، لطفاً دستورالعمل‌های زیر را دنبال کنید:\n"
+                    "1. نصب خودکار جدید را دانلود کنید.\n"
+                    "2. نصب را مجدداً انجام دهید."
                 )
-                
-                # اجرای اسکریپت به‌روزرسانی
-                process = os.system(f"sudo bash {LOCAL_UPDATE_SCRIPT}")
-                
-                if process == 0:
-                    # پیام موفقیت پس از اتمام به‌روزرسانی
-                    await update.message.reply_text(
-                        f"🚀 به‌روزرسانی با موفقیت انجام شد! 🌟\n\n"
-                        f"🔄 نسخه جدید ربات شما: **{latest_version}**\n"
-                        "✨ ربات شما اکنون آماده استفاده است.\n\n"
-                        "🙏 از اینکه همیشه همراه ما هستید، سپاسگزاریم! 💙"
-                    )
-                else:
-                    # پیام خطا در صورت بروز مشکل
-                    await update.message.reply_text(
-                        "❌ خطا در فرآیند به‌روزرسانی. لطفاً لاگ‌ها را بررسی کنید یا به صورت دستی اقدام کنید."
-                    )
         else:
-            await update.message.reply_text(
-                "⚠️ خطا در بررسی نسخه جدید. لطفاً بعداً دوباره تلاش کنید."
-            )
+            await update.message.reply_text("خطا در بررسی نسخه جدید. لطفاً بعداً دوباره تلاش کنید.")
     except Exception as e:
-        await update.message.reply_text(
-            f"❌ خطای غیرمنتظره در بررسی یا اجرای به‌روزرسانی: {e}"
-        )
-
-
+        logger.error(f"خطا در بررسی آپدیت: {e}")
+        await update.message.reply_text("خطای غیرمنتظره در بررسی آپدیت.")
 
 # دکمه‌های پشتیبانی
 SUPPORT_BUTTON = InlineKeyboardMarkup(
@@ -376,10 +341,9 @@ async def start(update: Update, context: CallbackContext):
         return
     logger.info(f"User {user.first_name} ({user.id}) started the bot.")
     await update.message.reply_text(
-        "🌟 خوش‌آمدید به نسخه جدید ربات Outline!\nبرای مدیریت سرور یکی از گزینه‌های زیر را انتخاب کنید.",
+        "سلام! برای مدیریت سرور Outline یکی از گزینه‌های زیر را انتخاب کنید.",
         reply_markup=MAIN_KEYBOARD,
     )
-
 
 # مرحله 1: دریافت نام کاربر
 async def ask_for_user_name(update: Update, context: CallbackContext):
@@ -443,13 +407,30 @@ async def create_user(update: Update, context: CallbackContext):
         if response.status_code in [200, 201]:
             data = response.json()
             user_id = data["id"]
+            access_url = data["accessUrl"]
+
+            # تنظیم محدودیت حجمی
+            data_limit_gb = 10  # حجم مجاز به گیگابایت
+            limit_bytes = data_limit_gb * 1024 ** 3
+            limit_response = requests.put(
+                f"{OUTLINE_API_URL}/access-keys/{user_id}/data-limit",
+                headers={"Authorization": f"Bearer {OUTLINE_API_KEY}"},
+                json={"limit": {"bytes": limit_bytes}},
+                verify=False,
+            )
+
+            if limit_response.status_code == 204:
+                logger.info(f"محدودیت حجمی {data_limit_gb} گیگابایت با موفقیت اعمال شد.")
+            else:
+                logger.warning(f"خطا در اعمال محدودیت حجمی: {limit_response.status_code} {limit_response.text}")
 
             # ذخیره اطلاعات کاربر در فایل JSON
             user_data = load_user_data()
             user_data["users"][str(user_id)] = {
                 "name": user_name,
-                "expiry_date": expiry_date.strftime("%Y-%m-%d"),
-                "accessUrl": data["accessUrl"],
+                "expiry_date": expiry_date.strftime("%Y-%m-%d %H:%M:%S"),
+                "accessUrl": access_url,
+                "data_limit_gb": data_limit_gb,
             }
             save_user_data(user_data)
 
@@ -458,9 +439,10 @@ async def create_user(update: Update, context: CallbackContext):
                 f"کاربر جدید ایجاد شد! 🎉\n\n"
                 f"ID: {user_id}\n"
                 f"Name: {user_name}\n"
-                f"تاریخ انقضا: {expiry_date.strftime('%Y-%m-%d')}\n\n"
+                f"زمان انقضا: {expiry_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"حجم مصرفی مجاز: {data_limit_gb} گیگابایت\n\n"
                 f"لینک اتصال:\n"
-                f"{data['accessUrl']}\n\n"
+                f"{access_url}\n\n"
                 f"لینک دانلود برنامه outline برای تمام سیستم عامل ها:\n"
                 f"iOS: [App Store](https://apps.apple.com/us/app/outline-app/id1356177741)\n"
                 f"Android: [Play Store](https://play.google.com/store/apps/details?id=org.outline.android.client&hl=en&pli=1)\n"
@@ -478,6 +460,7 @@ async def create_user(update: Update, context: CallbackContext):
     await update.message.reply_text("به منوی اصلی بازگشتید.", reply_markup=MAIN_KEYBOARD)
     return ConversationHandler.END
 
+
 # مشاهده کاربران
 def parse_date(date_str):
     try:
@@ -489,7 +472,7 @@ def parse_date(date_str):
 
 async def list_users(update: Update, context: CallbackContext):
     if not is_admin(update):
-        await update.message.reply_text("شما مجاز به استفاده از این ربات نیستید.")
+        await update.message.reply_text("❌ شما مجاز به استفاده از این ربات نیستید.")
         return
 
     user_data = load_user_data()["users"]
@@ -504,10 +487,15 @@ async def list_users(update: Update, context: CallbackContext):
 
             expiry_date = parse_date(details["expiry_date"]).date()
             status = "✅ فعال" if expiry_date >= today else "❌ منقضی‌شده"
+            data_limit = details.get("data_limit_gb", "نامحدود")
+            data_used = details.get("data_used_gb", 0)
+
             message += (
                 f"ID: {user_id}\n"
                 f"Name: {details['name']}\n"
-                f"تاریخ انقضا: {details['expiry_date']} ({status})\n\n"
+                f"تاریخ انقضا: {details['expiry_date']} ({status})\n"
+                f"📊 حجم کل: {data_limit} گیگابایت\n"
+                f"📉 حجم مصرف‌شده: {data_used} گیگابایت\n\n"
             )
 
         await update.message.reply_text(message)
