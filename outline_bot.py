@@ -230,15 +230,26 @@ def schedule_user_cleanup():
 # هندلر دریافت آخرین آپدیت
 async def check_for_update(update: Update, context: CallbackContext):
     GITHUB_VERSION_URL = "https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/version.txt"
+    LOCAL_VERSION_FILE = "/opt/outline_bot/version.txt"
     LOCAL_UPDATE_SCRIPT = "/opt/outline_bot/update.sh"
 
     try:
+        # خواندن نسخه فعلی از فایل محلی
+        try:
+            with open(LOCAL_VERSION_FILE, "r") as file:
+                current_version = file.read().strip()
+        except FileNotFoundError:
+            current_version = "unknown"
+
+        # دریافت نسخه جدید از گیت‌هاب
         response = requests.get(GITHUB_VERSION_URL)
         if response.status_code == 200:
             latest_version = response.text.strip()
-            if BOT_VERSION == latest_version:
+            
+            # مقایسه نسخه فعلی با نسخه جدید
+            if current_version == latest_version:
                 await update.message.reply_text(
-                    f"🎉 شما در حال استفاده از آخرین نسخه هستید: {BOT_VERSION}"
+                    f"🎉 شما در حال استفاده از آخرین نسخه هستید: {current_version}"
                 )
             else:
                 await update.message.reply_text(
@@ -267,7 +278,6 @@ async def check_for_update(update: Update, context: CallbackContext):
         await update.message.reply_text(
             f"❌ خطای غیرمنتظره در بررسی یا اجرای به‌روزرسانی: {e}"
         )
-
 
 # دکمه‌های پشتیبانی
 SUPPORT_BUTTON = InlineKeyboardMarkup(
