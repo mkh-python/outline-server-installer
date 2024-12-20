@@ -111,9 +111,10 @@ async def create_test_account(update: Update, context: CallbackContext):
             user_data = load_user_data()
             user_data["users"][str(user_id)] = {
                 "name": test_user_name,
-                "expiry_date": expiry_date.strftime("%Y-%m-%d %H:%M:%S"),
-                "accessUrl": access_url,
-                "data_limit_gb": data_limit_gb,
+                "expiry_date": expiry_date.strftime("%Y-%m-%d"),
+                "accessUrl": data["accessUrl"],
+                "data_limit_gb": data_limit,
+                "data_used_gb": 0  # مقدار پیش‌فرض
             }
             save_user_data(user_data)
 
@@ -499,7 +500,7 @@ def parse_date(date_str):
 
 async def list_users(update: Update, context: CallbackContext):
     if not is_admin(update):
-        await update.message.reply_text("شما مجاز به استفاده از این ربات نیستید.")
+        await update.message.reply_text("❌ شما مجاز به استفاده از این ربات نیستید.")
         return
 
     user_data = load_user_data()["users"]
@@ -514,10 +515,15 @@ async def list_users(update: Update, context: CallbackContext):
 
             expiry_date = parse_date(details["expiry_date"]).date()
             status = "✅ فعال" if expiry_date >= today else "❌ منقضی‌شده"
+            data_limit = details.get("data_limit_gb", "نامحدود")
+            data_used = details.get("data_used_gb", 0)
+
             message += (
                 f"ID: {user_id}\n"
                 f"Name: {details['name']}\n"
-                f"تاریخ انقضا: {details['expiry_date']} ({status})\n\n"
+                f"تاریخ انقضا: {details['expiry_date']} ({status})\n"
+                f"📊 حجم کل: {data_limit} گیگابایت\n"
+                f"📉 حجم مصرف‌شده: {data_used} گیگابایت\n\n"
             )
 
         await update.message.reply_text(message)
