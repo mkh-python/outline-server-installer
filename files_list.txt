@@ -1,0 +1,7 @@
+outline_bot.py
+delete_user.py
+install.sh
+update.sh
+users_data.json
+README.md
+version.txt
