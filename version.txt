@@ -1,4 +1,1 @@
-echo "1.37.3" > version.txt
-git add version.txt
-git commit -m "Add version.txt for update tracking"
-git push origin main
+1.37.3
