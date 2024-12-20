@@ -31,6 +31,7 @@ wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/ma
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/update.sh
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/README.md
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/version.txt
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/install.sh
 
 # بررسی دانلود فایل‌ها
 if [ ! -f "outline_bot.py" ] || [ ! -f "delete_user.py" ] || [ ! -f "users_data.json" ] || [ ! -f "update.sh" ]; then
