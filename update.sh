@@ -39,19 +39,33 @@ REMOTE_FILES=$(curl -s "$GITHUB_REPO_URL/files_list.txt")
 for FILE in $REMOTE_FILES; do
     if [ ! -f "$BOT_DIR/$FILE" ]; then
         echo "فایل $FILE در سرور یافت نشد. در حال دانلود..."
-    fi
-    curl -s -o "$BOT_DIR/$FILE" "$GITHUB_REPO_URL/$FILE"
-    if [ $? -eq 0 ]; then
-        echo "فایل $FILE با موفقیت به‌روزرسانی یا دانلود شد."
+        curl -s -o "$BOT_DIR/$FILE" "$GITHUB_REPO_URL/$FILE"
+        if [ $? -eq 0 ]; then
+            echo "فایل $FILE با موفقیت دانلود و اضافه شد."
+        else
+            echo "خطا در دانلود فایل $FILE. عملیات متوقف شد."
+            # اطلاع‌رسانی به کاربر در صورت خطا در دانلود
+            BOT_TOKEN=$(jq -r '.BOT_TOKEN' "$BOT_DIR/.config.json")
+            ADMIN_ID=$(jq -r '.ADMIN_IDS[0]' "$BOT_DIR/.config.json")
+            curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+                -d "chat_id=$ADMIN_ID" \
+                -d "text=❌ خطا در دانلود فایل $FILE. عملیات متوقف شد."
+            exit 1
+        fi
     else
-        echo "خطا در دانلود فایل $FILE. عملیات متوقف شد."
-        # اطلاع‌رسانی به کاربر در صورت خطا در دانلود
-        BOT_TOKEN=$(jq -r '.BOT_TOKEN' "$BOT_DIR/.config.json")
-        ADMIN_ID=$(jq -r '.ADMIN_IDS[0]' "$BOT_DIR/.config.json")
-        curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-            -d "chat_id=$ADMIN_ID" \
-            -d "text=❌ خطا در دانلود فایل $FILE. عملیات متوقف شد."
-        exit 1
+        echo "فایل $FILE قبلاً موجود است. بررسی به‌روزرسانی..."
+        curl -s -o "$BOT_DIR/$FILE" "$GITHUB_REPO_URL/$FILE"
+        if [ $? -eq 0 ]; then
+            echo "فایل $FILE با موفقیت به‌روزرسانی شد."
+        else
+            echo "خطا در به‌روزرسانی فایل $FILE."
+            BOT_TOKEN=$(jq -r '.BOT_TOKEN' "$BOT_DIR/.config.json")
+            ADMIN_ID=$(jq -r '.ADMIN_IDS[0]' "$BOT_DIR/.config.json")
+            curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+                -d "chat_id=$ADMIN_ID" \
+                -d "text=❌ خطا در به‌روزرسانی فایل $FILE. لطفاً بررسی کنید."
+            exit 1
+        fi
     fi
 done
 
