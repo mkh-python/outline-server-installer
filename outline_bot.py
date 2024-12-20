@@ -242,7 +242,7 @@ async def check_for_update(update: Update, context: CallbackContext):
                 )
             else:
                 await update.message.reply_text(
-                    f"🔔 نسخه جدیدی در دسترس است: {latest_version}\n"
+                    f"🔔 نسخه جدیدی در دسترس است: {latest_version}\n\n"
                     "⏳ فرآیند به‌روزرسانی آغاز شد. لطفاً صبر کنید..."
                 )
 
