@@ -255,7 +255,56 @@ async def check_for_update(update: Update, context: CallbackContext):
             else:
                 await update.message.reply_text(
                     f"🔔 نسخه جدیدی در دسترس است: {latest_version}\n\n"
-                    "⏳ فرآیند به‌روزرسانی آغاز شد. لطفاً صبر کنید..."
+                    "✨ لطفاً صبور باشید، فرآیند به‌روزرسانی به زودی آغاز می‌شود..."
+                )
+
+                # اجرای فایل به‌روزرسانی
+                process = subprocess.run(["sudo", "bash", LOCAL_UPDATE_SCRIPT], capture_output=True, text=True)
+
+                if process.returncode == 0:
+                    await update.message.reply_text(
+                        f"🚀 به‌روزرسانی با موفقیت انجام شد! 🌟\n\n"
+                        f"🔄 نسخه جدید ربات شما: {latest_version}\n"
+                        "✨ ربات شما اکنون آماده استفاده است."
+                    )
+                else:
+                    await update.message.reply_text(
+                        "❌ خطا در فرآیند به‌روزرسانی. لطفاً لاگ‌ها را بررسی کنید یا به صورت دستی اقدام کنید."
+                    )
+        else:
+            await update.message.reply_text(
+                "⚠️ خطا در بررسی نسخه جدید. لطفاً بعداً دوباره تلاش کنید."
+            )
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ خطای غیرمنتظره در بررسی یا اجرای به‌روزرسانی: {e}"
+        )(update: Update, context: CallbackContext):
+    GITHUB_VERSION_URL = "https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/version.txt"
+    LOCAL_VERSION_FILE = "/opt/outline_bot/version.txt"
+    LOCAL_UPDATE_SCRIPT = "/opt/outline_bot/update.sh"
+
+    try:
+        # خواندن نسخه فعلی از فایل محلی
+        try:
+            with open(LOCAL_VERSION_FILE, "r") as file:
+                current_version = file.read().strip()
+        except FileNotFoundError:
+            current_version = "unknown"
+
+        # دریافت نسخه جدید از گیت‌هاب
+        response = requests.get(GITHUB_VERSION_URL)
+        if response.status_code == 200:
+            latest_version = response.text.strip()
+            
+            # مقایسه نسخه فعلی با نسخه جدید
+            if current_version == latest_version:
+                await update.message.reply_text(
+                    f"🎉 شما در حال استفاده از آخرین نسخه هستید: {current_version}"
+                )
+            else:
+                await update.message.reply_text(
+                    f"🔔 نسخه جدیدی در دسترس است: {latest_version}\n\n"
+                    "✨ لطفاً صبور باشید، فرآیند به‌روزرسانی به زودی آغاز می‌شود..."
                 )
 
                 # اجرای فایل به‌روزرسانی
@@ -279,6 +328,7 @@ async def check_for_update(update: Update, context: CallbackContext):
         await update.message.reply_text(
             f"❌ خطای غیرمنتظره در بررسی یا اجرای به‌روزرسانی: {e}"
         )
+
 
 # دکمه‌های پشتیبانی
 SUPPORT_BUTTON = InlineKeyboardMarkup(
