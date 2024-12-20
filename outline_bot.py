@@ -17,6 +17,27 @@ from telegram.ext import (
     filters,
 )
 import os
+import sys
+
+LOCK_FILE = "/tmp/outline_bot.lock"
+
+# بررسی وجود فایل قفل
+if os.path.exists(LOCK_FILE):
+    print("ربات در حال حاضر در حال اجرا است. فرآیند متوقف می‌شود.")
+    sys.exit(1)
+
+# ایجاد فایل قفل
+with open(LOCK_FILE, "w") as lock:
+    lock.write(str(os.getpid()))
+
+# حذف فایل قفل هنگام خروج
+import atexit
+def remove_lock():
+    if os.path.exists(LOCK_FILE):
+        os.remove(LOCK_FILE)
+
+atexit.register(remove_lock)
+
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
