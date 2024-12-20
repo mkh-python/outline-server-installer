@@ -1,6 +1,7 @@
 import logging
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 import requests
+import subprocess
 import urllib3
 from threading import Timer
 import json
@@ -113,7 +114,6 @@ async def create_test_account(update: Update, context: CallbackContext):
                 "expiry_date": expiry_date.strftime("%Y-%m-%d %H:%M:%S"),
                 "accessUrl": access_url,
                 "data_limit_gb": data_limit_gb,
-                "data_used_gb": 0,  # مقدار اولیه حجم مصرف‌شده
             }
             save_user_data(user_data)
 
@@ -122,8 +122,7 @@ async def create_test_account(update: Update, context: CallbackContext):
                 f"اکانت تست با موفقیت ایجاد شد! 🎉\n\n"
                 f"Name: {test_user_name}\n"
                 f"زمان انقضا: {expiry_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"حجم مصرفی مجاز: {data_limit_gb} گیگابایت\n"
-                f"حجم مصرف‌شده: 0 گیگابایت\n\n"
+                f"حجم مصرفی مجاز: {data_limit_gb} گیگابایت\n\n"
                 f"لینک اتصال:\n{access_url}"
             )
             await update.message.reply_text(message)
@@ -135,7 +134,6 @@ async def create_test_account(update: Update, context: CallbackContext):
         await update.message.reply_text("خطای غیرمنتظره در ایجاد اکانت تست!")
 
     await update.message.reply_text("به منوی اصلی بازگشتید.", reply_markup=MAIN_KEYBOARD)
-
 
 
 async def ask_for_data_limit(update: Update, context: CallbackContext):
@@ -269,7 +267,6 @@ async def check_for_update(update: Update, context: CallbackContext):
         await update.message.reply_text(
             f"❌ خطای غیرمنتظره در بررسی یا اجرای به‌روزرسانی: {e}"
         )
-
 
 # دکمه‌های پشتیبانی
 SUPPORT_BUTTON = InlineKeyboardMarkup(
@@ -491,7 +488,7 @@ def parse_date(date_str):
 
 async def list_users(update: Update, context: CallbackContext):
     if not is_admin(update):
-        await update.message.reply_text("❌ شما مجاز به استفاده از این ربات نیستید.")
+        await update.message.reply_text("شما مجاز به استفاده از این ربات نیستید.")
         return
 
     user_data = load_user_data()["users"]
@@ -506,15 +503,10 @@ async def list_users(update: Update, context: CallbackContext):
 
             expiry_date = parse_date(details["expiry_date"]).date()
             status = "✅ فعال" if expiry_date >= today else "❌ منقضی‌شده"
-            data_limit = details.get("data_limit_gb", "نامحدود")
-            data_used = details.get("data_used_gb", 0)
-
             message += (
                 f"ID: {user_id}\n"
                 f"Name: {details['name']}\n"
-                f"تاریخ انقضا: {details['expiry_date']} ({status})\n"
-                f"📊 حجم کل: {data_limit} گیگابایت\n"
-                f"📉 حجم مصرف‌شده: {data_used} گیگابایت\n\n"
+                f"تاریخ انقضا: {details['expiry_date']} ({status})\n\n"
             )
 
         await update.message.reply_text(message)
