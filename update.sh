@@ -3,7 +3,6 @@
 LOG_FILE="/opt/outline_bot/update.log"
 exec > >(tee -a $LOG_FILE) 2>&1
 
-
 # مسیرهای اصلی
 BOT_DIR="/opt/outline_bot"
 BACKUP_DIR="$BOT_DIR/backup_$(date +%Y%m%d_%H%M%S)"
@@ -11,7 +10,13 @@ GITHUB_REPO_URL="https://raw.githubusercontent.com/mkh-python/outline-server-ins
 FILES=("outline_bot.py" "delete_user.py" "install.sh")
 
 # بررسی نسخه فعلی و جدید
-CURRENT_VERSION=$(cat "$BOT_DIR/version.txt")
+if [ ! -f "$BOT_DIR/version.txt" ]; then
+    echo "فایل version.txt یافت نشد. نسخه فعلی: ناشناخته"
+    CURRENT_VERSION=""
+else
+    CURRENT_VERSION=$(cat "$BOT_DIR/version.txt")
+fi
+
 REMOTE_VERSION=$(curl -s "$GITHUB_REPO_URL/version.txt")
 
 if [ "$CURRENT_VERSION" == "$REMOTE_VERSION" ]; then
@@ -62,12 +67,9 @@ BOT_TOKEN=$(jq -r '.BOT_TOKEN' "$BOT_DIR/.config.json")
 ADMIN_ID=$(jq -r '.ADMIN_IDS[0]' "$BOT_DIR/.config.json")
 curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
     -d "chat_id=$ADMIN_ID" \
-    -d "text=🚀 به‌روزرسانی با موفقیت انجام شد! 🌟
+    -d "text=🚀 به‌روزرسانی با موفقیت انجام شد!
+نسخه جدید: $REMOTE_VERSION
 
-🔄 نسخه جدید ربات شما: $REMOTE_VERSION
-✨ ربات شما اکنون آماده استفاده است.
-
-🙏 از اینکه همیشه همراه ما هستید، سپاسگزاریم! 💙"
-
+ربات شما اکنون به آخرین نسخه به‌روزرسانی شده است. 🎉"
 
 echo "به‌روزرسانی کامل شد."
