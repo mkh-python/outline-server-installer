@@ -33,14 +33,24 @@ mkdir -p "$BACKUP_DIR"
 cp "$BOT_DIR/users_data.json" "$BACKUP_DIR/users_data.json.bak"
 cp "$BOT_DIR/.config.json" "$BACKUP_DIR/.config.json.bak"
 
-# دانلود و جایگزینی فایل‌های جدید
+# دانلود و جایگزینی فایل‌های جدید و فایل‌های جدیدی که در سرور نیستند
 echo "دانلود و جایگزینی فایل‌های جدید..."
-for FILE in "${FILES[@]}"; do
+REMOTE_FILES=$(curl -s "$GITHUB_REPO_URL/files_list.txt")
+for FILE in $REMOTE_FILES; do
+    if [ ! -f "$BOT_DIR/$FILE" ]; then
+        echo "فایل $FILE در سرور یافت نشد. در حال دانلود..."
+    fi
     curl -s -o "$BOT_DIR/$FILE" "$GITHUB_REPO_URL/$FILE"
     if [ $? -eq 0 ]; then
-        echo "فایل $FILE با موفقیت به‌روزرسانی شد."
+        echo "فایل $FILE با موفقیت به‌روزرسانی یا دانلود شد."
     else
         echo "خطا در دانلود فایل $FILE. عملیات متوقف شد."
+        # اطلاع‌رسانی به کاربر در صورت خطا در دانلود
+        BOT_TOKEN=$(jq -r '.BOT_TOKEN' "$BOT_DIR/.config.json")
+        ADMIN_ID=$(jq -r '.ADMIN_IDS[0]' "$BOT_DIR/.config.json")
+        curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+            -d "chat_id=$ADMIN_ID" \
+            -d "text=❌ خطا در دانلود فایل $FILE. عملیات متوقف شد."
         exit 1
     fi
 done
@@ -61,15 +71,21 @@ echo "$REMOTE_VERSION" > "$BOT_DIR/version.txt"
 # ری‌استارت سرویس ربات
 echo "ری‌استارت سرویس..."
 sudo systemctl restart outline_bot.service
+if [ $? -ne 0 ]; then
+    echo "خطا در ری‌استارت سرویس."
+    BOT_TOKEN=$(jq -r '.BOT_TOKEN' "$BOT_DIR/.config.json")
+    ADMIN_ID=$(jq -r '.ADMIN_IDS[0]' "$BOT_DIR/.config.json")
+    curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+        -d "chat_id=$ADMIN_ID" \
+        -d "text=❌ خطا در فرآیند به‌روزرسانی. لطفاً لاگ‌ها را بررسی کنید یا به صورت دستی اقدام کنید."
+    exit 1
+fi
 
-# اطلاع‌رسانی به کاربر
+# اطلاع‌رسانی به کاربر در صورت موفقیت به‌روزرسانی
 BOT_TOKEN=$(jq -r '.BOT_TOKEN' "$BOT_DIR/.config.json")
 ADMIN_ID=$(jq -r '.ADMIN_IDS[0]' "$BOT_DIR/.config.json")
 curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
     -d "chat_id=$ADMIN_ID" \
-    -d "text=🚀 به‌روزرسانی با موفقیت انجام شد!
-نسخه جدید: $REMOTE_VERSION
-
-ربات شما اکنون به آخرین نسخه به‌روزرسانی شده است. 🎉"
+    -d "text=🚀 به‌روزرسانی با موفقیت انجام شد! 🌟\n\nنسخه جدید: $REMOTE_VERSION\n\nربات شما اکنون به آخرین نسخه به‌روزرسانی شده است. 🎉"
 
 echo "به‌روزرسانی کامل شد."
