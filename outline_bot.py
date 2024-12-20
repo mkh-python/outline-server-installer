@@ -338,9 +338,10 @@ async def start(update: Update, context: CallbackContext):
         return
     logger.info(f"User {user.first_name} ({user.id}) started the bot.")
     await update.message.reply_text(
-        "سلام! برای مدیریت سرور Outline یکی از گزینه‌های زیر را انتخاب کنید.",
+        "🌟 خوش‌آمدید به نسخه جدید ربات Outline!\nبرای مدیریت سرور یکی از گزینه‌های زیر را انتخاب کنید.",
         reply_markup=MAIN_KEYBOARD,
     )
+
 
 # مرحله 1: دریافت نام کاربر
 async def ask_for_user_name(update: Update, context: CallbackContext):
