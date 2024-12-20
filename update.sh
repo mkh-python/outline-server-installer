@@ -9,6 +9,22 @@ BACKUP_DIR="$BOT_DIR/backup_$(date +%Y%m%d_%H%M%S)"
 GITHUB_REPO_URL="https://raw.githubusercontent.com/mkh-python/outline-server-installer/main"
 FILES=("outline_bot.py" "delete_user.py" "install.sh")
 
+# بررسی و متوقف کردن سرویس
+if systemctl is-active --quiet outline_bot.service; then
+    echo "Stopping the service before update..."
+    sudo systemctl stop outline_bot.service
+    if [ $? -ne 0 ]; then
+        echo "Failed to stop the service."
+        exit 1
+    fi
+fi
+
+# حذف فایل قفل (در صورت وجود)
+if [ -f "/tmp/outline_bot.lock" ]; then
+    echo "Removing the lock file..."
+    rm -f /tmp/outline_bot.lock
+fi
+
 # بررسی نسخه فعلی و جدید
 if [ ! -f "$BOT_DIR/version.txt" ]; then
     echo "فایل version.txt یافت نشد. نسخه فعلی: ناشناخته"
@@ -80,18 +96,20 @@ if [ -f "$BACKUP_DIR/.config.json.bak" ]; then
 fi
 
 # به‌روزرسانی نسخه
-echo "$REMOTE_VERSION" > "$BOT_DIR/version.txt"
+if [ "$REMOTE_VERSION" != "" ]; then
+    echo "$REMOTE_VERSION" > "$BOT_DIR/version.txt"
+fi
 
-# ری‌استارت سرویس ربات
-echo "ری‌استارت سرویس..."
-sudo systemctl restart outline_bot.service
+# ری‌استارت سرویس
+echo "Restarting the service..."
+sudo systemctl start outline_bot.service
 if [ $? -ne 0 ]; then
-    echo "خطا در ری‌استارت سرویس."
+    echo "Failed to restart the service. Please check manually."
     BOT_TOKEN=$(jq -r '.BOT_TOKEN' "$BOT_DIR/.config.json")
     ADMIN_ID=$(jq -r '.ADMIN_IDS[0]' "$BOT_DIR/.config.json")
     curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
         -d "chat_id=$ADMIN_ID" \
-        -d "text=❌ خطا در فرآیند به‌روزرسانی. لطفاً لاگ‌ها را بررسی کنید یا به صورت دستی اقدام کنید."
+        -d "text=❌ خطا در ری‌استارت سرویس. لطفاً لاگ‌ها را بررسی کنید."
     exit 1
 fi
 
