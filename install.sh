@@ -28,15 +28,18 @@ cd /opt/outline_bot
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/outline_bot.py
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/delete_user.py
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/users_data.json
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/update.sh
 
 # بررسی دانلود فایل‌ها
-if [ ! -f "outline_bot.py" ] || [ ! -f "delete_user.py" ] || [ ! -f "users_data.json" ]; then
+if [ ! -f "outline_bot.py" ] || [ ! -f "delete_user.py" ] || [ ! -f "users_data.json" ] || [ ! -f "update.sh" ]; then
     echo "خطا در دانلود فایل‌های ربات. لطفاً اتصال اینترنت را بررسی کنید."
     exit 1
 fi
 
 # اطمینان از مجوز اجرای فایل‌ها
 chmod +x *.py
+chmod +x update.sh
+
 
 # نصب سرور Outline
 echo "در حال نصب سرور Outline..."
