@@ -268,6 +268,7 @@ async def check_for_update(update: Update, context: CallbackContext):
             f"❌ خطای غیرمنتظره در بررسی یا اجرای به‌روزرسانی: {e}"
         )
 
+
 # دکمه‌های پشتیبانی
 SUPPORT_BUTTON = InlineKeyboardMarkup(
     [
