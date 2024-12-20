@@ -232,25 +232,44 @@ def schedule_user_cleanup():
 # هندلر دریافت آخرین آپدیت
 async def check_for_update(update: Update, context: CallbackContext):
     GITHUB_VERSION_URL = "https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/version.txt"
+    LOCAL_UPDATE_SCRIPT = "/opt/outline_bot/update.sh"
 
     try:
         response = requests.get(GITHUB_VERSION_URL)
         if response.status_code == 200:
             latest_version = response.text.strip()
             if BOT_VERSION == latest_version:
-                await update.message.reply_text(f"شما در حال استفاده از آخرین نسخه هستید: {BOT_VERSION}")
+                await update.message.reply_text(
+                    f"🎉 شما در حال استفاده از آخرین نسخه هستید: {BOT_VERSION}"
+                )
             else:
                 await update.message.reply_text(
-                    f"نسخه جدیدی در دسترس است: {latest_version}\n"
-                    "برای دریافت نسخه جدید، لطفاً دستورالعمل‌های زیر را دنبال کنید:\n"
-                    "1. نصب خودکار جدید را دانلود کنید.\n"
-                    "2. نصب را مجدداً انجام دهید."
+                    f"🔔 نسخه جدیدی در دسترس است: {latest_version}\n"
+                    "⏳ فرآیند به‌روزرسانی آغاز شد. لطفاً صبر کنید..."
                 )
+
+                # اجرای فایل به‌روزرسانی
+                process = subprocess.run(["sudo", "bash", LOCAL_UPDATE_SCRIPT], capture_output=True, text=True)
+
+                if process.returncode == 0:
+                    await update.message.reply_text(
+                        f"🚀 به‌روزرسانی با موفقیت انجام شد! 🌟\n\n"
+                        f"🔄 نسخه جدید ربات شما: {latest_version}\n"
+                        "✨ ربات شما اکنون آماده استفاده است."
+                    )
+                else:
+                    await update.message.reply_text(
+                        "❌ خطا در فرآیند به‌روزرسانی. لطفاً لاگ‌ها را بررسی کنید یا به صورت دستی اقدام کنید."
+                    )
         else:
-            await update.message.reply_text("خطا در بررسی نسخه جدید. لطفاً بعداً دوباره تلاش کنید.")
+            await update.message.reply_text(
+                "⚠️ خطا در بررسی نسخه جدید. لطفاً بعداً دوباره تلاش کنید."
+            )
     except Exception as e:
-        logger.error(f"خطا در بررسی آپدیت: {e}")
-        await update.message.reply_text("خطای غیرمنتظره در بررسی آپدیت.")
+        await update.message.reply_text(
+            f"❌ خطای غیرمنتظره در بررسی یا اجرای به‌روزرسانی: {e}"
+        )
+
 
 # دکمه‌های پشتیبانی
 SUPPORT_BUTTON = InlineKeyboardMarkup(
