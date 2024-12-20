@@ -168,10 +168,13 @@ Description=Outline Bot Service
 After=network.target
 
 [Service]
-User=$USER
+User=root
 WorkingDirectory=/opt/outline_bot
 ExecStart=/opt/outline_bot/outline_env/bin/python3 /opt/outline_bot/outline_bot.py
 Restart=always
+TimeoutStopSec=10
+StandardOutput=append:/opt/outline_bot/service.log
+StandardError=append:/opt/outline_bot/service.log
 
 [Install]
 WantedBy=multi-user.target
