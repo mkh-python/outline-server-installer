@@ -6,7 +6,7 @@ This repository contains an automated script to install and configure the Outlin
 
 ## What's New?
 
-### Version 1.37.3.4
+### Version 1.37.3.7
 - Enhanced user data management: Added data usage limits and tracking.
 - Improved update process: Automatically checks and installs updates from GitHub.
 - Bug fixes and performance improvements.
