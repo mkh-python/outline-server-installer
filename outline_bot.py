@@ -21,22 +21,27 @@ import sys
 
 LOCK_FILE = "/tmp/outline_bot.lock"
 
-# بررسی وجود فایل قفل
-if os.path.exists(LOCK_FILE):
+# بررسی وجود فایل قفل (تنها در صورت نیاز)
+USE_LOCK_FILE = False  # تنظیم به True در صورت نیاز به استفاده از فایل قفل
+
+if USE_LOCK_FILE and os.path.exists(LOCK_FILE):
     print("ربات در حال حاضر در حال اجرا است. فرآیند متوقف می‌شود.")
     sys.exit(1)
 
-# ایجاد فایل قفل
-with open(LOCK_FILE, "w") as lock:
-    lock.write(str(os.getpid()))
+if USE_LOCK_FILE:
+    # ایجاد فایل قفل
+    with open(LOCK_FILE, "w") as lock:
+        lock.write(str(os.getpid()))
 
-# حذف فایل قفل هنگام خروج
-import atexit
-def remove_lock():
-    if os.path.exists(LOCK_FILE):
-        os.remove(LOCK_FILE)
+# حذف فایل قفل هنگام خروج (تنها در صورت استفاده)
+if USE_LOCK_FILE:
+    import atexit
+    def remove_lock():
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
 
-atexit.register(remove_lock)
+    atexit.register(remove_lock)
+
 
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -528,6 +533,7 @@ async def list_users(update: Update, context: CallbackContext):
     if user_data:
         message = "👥 کاربران موجود:\n\n"
         today = datetime.now().date()
+        messages = []  # برای نگهداری بخش‌های پیام
 
         for user_id, details in user_data.items():
             if not isinstance(details, dict) or "expiry_date" not in details:
@@ -539,15 +545,27 @@ async def list_users(update: Update, context: CallbackContext):
             data_limit = details.get("data_limit_gb", "نامحدود")
             data_used = details.get("data_used_gb", 0)
 
-            message += (
+            # اضافه کردن اطلاعات کاربر به پیام
+            user_info = (
                 f"ID: {user_id}\n"
                 f"Name: {details['name']}\n"
                 f"تاریخ انقضا: {details['expiry_date']} ({status})\n"
                 f"📊 حجم کل: {data_limit} گیگابایت\n"
                 f"📉 حجم مصرف‌شده: {data_used} گیگابایت\n\n"
             )
+            if len(message) + len(user_info) > 4000:  # بررسی طول پیام
+                messages.append(message)  # اضافه کردن پیام به لیست پیام‌ها
+                message = ""  # ریست پیام فعلی
 
-        await update.message.reply_text(message)
+            message += user_info
+
+        # افزودن پیام باقی‌مانده به لیست پیام‌ها
+        if message:
+            messages.append(message)
+
+        # ارسال پیام‌ها
+        for msg in messages:
+            await update.message.reply_text(msg)
     else:
         await update.message.reply_text("هیچ کاربری یافت نشد.")
 
