@@ -59,17 +59,26 @@ fi
 read -p "آیا دامین دارید؟ (y/n): " HAS_DOMAIN
 if [[ "$HAS_DOMAIN" =~ ^[Yy](es|ES)?$ ]]; then
     read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
-    DOMAIN_IP=$(dig +short $DOMAIN_NAME | tail -n1)
+
+    # استخراج IP دامین
+    DOMAIN_IP=$(ping -c 1 "$DOMAIN_NAME" | grep -oP '(\d{1,3}\.){3}\d{1,3}' | head -n 1)
+
+    # استخراج IP سرور
     SERVER_IP=$(curl -s ifconfig.me)
 
+    # بررسی هماهنگی IP دامین با IP سرور
     if [ "$DOMAIN_IP" == "$SERVER_IP" ]; then
         echo "دامین با IP سرور هماهنگ است. ادامه می‌دهیم..."
         API_URL="https://$DOMAIN_NAME"
     else
         echo "خطا: دامین وارد شده با IP سرور هماهنگ نیست. لطفاً بررسی کنید."
+        echo "دامین وارد شده: $DOMAIN_NAME"
+        echo "IP دامین: $DOMAIN_IP"
+        echo "IP سرور: $SERVER_IP"
         exit 1
     fi
 else
+    # اگر کاربر دامین نداشت، استفاده از IP سرور
     SERVER_IP=$(curl -s ifconfig.me)
     API_URL="https://$SERVER_IP"
 fi
