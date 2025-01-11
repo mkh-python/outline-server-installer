@@ -204,7 +204,17 @@ async def create_user_with_limit(update: Update, context: CallbackContext):
             user_id = data["id"]
             access_url = data["accessUrl"]
 
-            # اعمال محدودیت حجمی
+            # استخراج دامین از OUTLINE_API_URL
+            domain_name = OUTLINE_API_URL.split("//")[1].split(":")[0]
+
+            # جایگزینی دقیق دامین در لینک اتصال
+            if "@" in access_url:
+                parts = access_url.split("@")
+                after_at = parts[1].split(":")
+                after_at[0] = domain_name
+                access_url = f"{parts[0]}@{':'.join(after_at)}"
+
+            # تنظیم محدودیت حجمی
             limit_bytes = context.user_data["data_limit"] * 1024**3  # تبدیل گیگابایت به بایت
             limit_response = requests.put(
                 f"{OUTLINE_API_URL}/access-keys/{user_id}/data-limit",
@@ -245,7 +255,6 @@ async def create_user_with_limit(update: Update, context: CallbackContext):
         await update.message.reply_text("خطای غیرمنتظره در ایجاد کاربر!")
 
     return ConversationHandler.END
-
 
 
 def schedule_user_cleanup():
