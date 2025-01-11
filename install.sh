@@ -60,11 +60,11 @@ read -p "آیا دامین دارید؟ (y/n): " HAS_DOMAIN
 if [[ "$HAS_DOMAIN" =~ ^[Yy](es|ES)?$ ]]; then
     read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
 
-    # استخراج IP دامین (اولویت با IPv4)
-    DOMAIN_IP=$(ping -c 1 "$DOMAIN_NAME" | grep -oP '(\d{1,3}\.){3}\d{1,3}' | head -n 1)
+    # استخراج IP دامین (IPv4)
+    DOMAIN_IP=$(ping -4 -c 1 "$DOMAIN_NAME" | grep -oP '(\d{1,3}\.){3}\d{1,3}' | head -n 1)
 
-    # استخراج IP سرور (اولویت با IPv4)
-    SERVER_IP=$(curl -s ifconfig.me)
+    # استخراج IP سرور (IPv4)
+    SERVER_IP=$(curl -s -4 ifconfig.me)
 
     # بررسی هماهنگی IP دامین با IP سرور
     if [ "$DOMAIN_IP" == "$SERVER_IP" ]; then
