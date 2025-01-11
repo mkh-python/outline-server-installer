@@ -43,10 +43,9 @@ fi
 chmod +x *.py
 chmod +x update.sh
 
-
 # نصب سرور Outline
 echo "در حال نصب سرور Outline..."
-sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-apps/master/server_manager/install_scripts/install_server.sh)"
+sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-server/master/src/server_manager/install_scripts/install_server.sh)"
 
 # بررسی موفقیت نصب و دریافت API Key
 if [ $? -eq 0 ]; then
@@ -56,9 +55,28 @@ else
     exit 1
 fi
 
+# پرسیدن دامین از کاربر
+read -p "آیا دامین دارید؟ (y/n): " HAS_DOMAIN
+if [[ "$HAS_DOMAIN" =~ ^[Yy](es|ES)?$ ]]; then
+    read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
+    DOMAIN_IP=$(dig +short $DOMAIN_NAME | tail -n1)
+    SERVER_IP=$(curl -s ifconfig.me)
+
+    if [ "$DOMAIN_IP" == "$SERVER_IP" ]; then
+        echo "دامین با IP سرور هماهنگ است. ادامه می‌دهیم..."
+        API_URL="https://$DOMAIN_NAME"
+    else
+        echo "خطا: دامین وارد شده با IP سرور هماهنگ نیست. لطفاً بررسی کنید."
+        exit 1
+    fi
+else
+    SERVER_IP=$(curl -s ifconfig.me)
+    API_URL="https://$SERVER_IP"
+fi
+
 # استخراج مقادیر certSha256 و apiUrl از فایل access.txt
 CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
-OUTLINE_API_URL=$(grep "apiUrl:" /opt/outline/access.txt | awk -F'apiUrl:' '{print $2}')
+OUTLINE_API_URL="$API_URL:$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')"
 
 # بررسی استخراج موفقیت‌آمیز داده‌ها
 if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
@@ -67,13 +85,9 @@ if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
     exit 1
 fi
 
-# استخراج OUTLINE_API_KEY از OUTLINE_API_URL
-OUTLINE_API_KEY=$(echo $OUTLINE_API_URL | awk -F'/' '{print $NF}')
-
 # نمایش اطلاعات استخراج‌شده
 echo "CERT_SHA256: $CERT_SHA256"
 echo "OUTLINE_API_URL: $OUTLINE_API_URL"
-echo "OUTLINE_API_KEY: $OUTLINE_API_KEY"
 
 # ایجاد فایل تنظیمات مخفی
 CONFIG_FILE="/opt/outline_bot/.config.json"
