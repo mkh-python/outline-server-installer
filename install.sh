@@ -60,6 +60,8 @@ fi
 
 
 
+#!/bin/bash
+
 # تنظیم Cloudflare Tunnel
 echo "در حال پیکربندی Cloudflare Tunnel..."
 TUNNEL_NAME="outline-vpn"
@@ -77,6 +79,13 @@ fi
 echo "ورود به حساب Cloudflare..."
 cloudflared login
 
+# حذف تونل موجود با همین نام (در صورت وجود)
+EXISTING_TUNNEL=$(cloudflared tunnel list | grep $TUNNEL_NAME | awk '{print $1}')
+if [ -n "$EXISTING_TUNNEL" ]; then
+    echo "تونل موجود یافت شد. حذف تونل $TUNNEL_NAME..."
+    cloudflared tunnel delete $TUNNEL_NAME
+fi
+
 # ایجاد تونل جدید
 echo "ایجاد تونل Cloudflare..."
 cloudflared tunnel create $TUNNEL_NAME
@@ -93,14 +102,14 @@ tunnel: $TUNNEL_ID
 credentials-file: $CREDENTIALS_FILE
 
 ingress:
-  - hostname: $DOMAIN_NAME
+  - hostname: outline.$(hostname).cloudflared.com
     service: http://localhost:$LOCAL_PORT
   - service: http_status:404
 EOF
 
 # تنظیم رکورد DNS در Cloudflare
-echo "تنظیم رکورد DNS در Cloudflare برای دامنه $DOMAIN_NAME..."
-cloudflared tunnel route dns $TUNNEL_NAME $DOMAIN_NAME
+echo "تنظیم رکورد DNS در Cloudflare..."
+cloudflared tunnel route dns $TUNNEL_NAME outline.$(hostname).cloudflared.com
 
 # ایجاد سرویس Systemd برای تونل
 sudo bash -c "cat > /etc/systemd/system/cloudflared.service" <<EOL
@@ -124,6 +133,7 @@ sudo systemctl enable cloudflared
 sudo systemctl start cloudflared
 
 echo "پیکربندی Cloudflare Tunnel با موفقیت انجام شد!"
+
 
 
 
