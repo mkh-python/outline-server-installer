@@ -60,6 +60,38 @@ read -p "آیا دامین دارید؟ (y/n): " HAS_DOMAIN
 if [[ "$HAS_DOMAIN" =~ ^[Yy](es|ES)?$ ]]; then
     read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
 
+    # استخراج IP دامنه (فقط IPv4)
+    DOMAIN_IP=$(dig +short "$DOMAIN_NAME" | head -n 1)
+
+    # بررسی معتبر بودن دامنه
+    if [[ -z "$DOMAIN_IP" ]]; then
+        echo "خطا: دامین وارد شده معتبر نیست یا به IP دسترسی ندارد."
+        exit 1
+    fi
+
+    echo "دامنه $DOMAIN_NAME به آدرس $DOMAIN_IP اشاره می‌کند."
+
+    # استخراج IP سرور (فقط IPv4)
+    SERVER_IP=$(curl -4 -s ifconfig.me)
+
+    # بررسی هماهنگی دامنه و سرور
+    if [[ "$DOMAIN_IP" == "$SERVER_IP" ]]; then
+        echo "دامنه مستقیماً به IP سرور اشاره می‌کند. ادامه می‌دهیم..."
+        API_URL="https://$DOMAIN_NAME"
+    else
+        echo "دامنه به Cloudflare متصل است یا IP متفاوتی دارد."
+        echo "ادامه پیکربندی برای Cloudflare Tunnel..."
+        API_URL="https://$DOMAIN_NAME"
+    fi
+else
+    # اگر کاربر دامین نداشت، استفاده از IP سرور
+    SERVER_IP=$(curl -4 -s ifconfig.me)
+    API_URL="https://$SERVER_IP"
+fi
+
+
+
+
 # تنظیم Cloudflare Tunnel
 echo "در حال پیکربندی Cloudflare Tunnel..."
 TUNNEL_NAME="outline-vpn"
@@ -126,39 +158,6 @@ sudo systemctl start cloudflared
 echo "پیکربندی Cloudflare Tunnel با موفقیت انجام شد!"
 
 
-    # استخراج IP دامین (فقط IPv4)
-    DOMAIN_IP=$(ping -4 -c 1 "$DOMAIN_NAME" | grep -oP '(\d{1,3}\.){3}\d{1,3}' | head -n 1)
-
-    # استخراج IP سرور (فقط IPv4)
-    SERVER_IP=$(curl -4 -s ifconfig.me)
-
-    # بررسی هماهنگی IP دامین با IP سرور
-    if [ "$DOMAIN_IP" == "$SERVER_IP" ]; then
-        echo "دامین با IP سرور هماهنگ است. ادامه می‌دهیم..."
-        API_URL="https://$DOMAIN_NAME"
-    else
-        echo "خطا: دامین وارد شده با IP سرور هماهنگ نیست. لطفاً بررسی کنید."
-        echo "دامین وارد شده: $DOMAIN_NAME"
-        echo "IP دامین: $DOMAIN_IP"
-        echo "IP سرور: $SERVER_IP"
-        exit 1
-    fi
-else
-    # اگر کاربر دامین نداشت، استفاده از IP سرور
-    SERVER_IP=$(curl -4 -s ifconfig.me)
-    API_URL="https://$SERVER_IP"
-fi
-
-# استخراج مقادیر certSha256 و apiUrl از فایل access.txt
-CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
-OUTLINE_API_URL="$API_URL:$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')"
-
-# بررسی استخراج موفقیت‌آمیز داده‌ها
-if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
-    echo "خطا در استخراج اطلاعات از فایل access.txt. لطفاً فایل را بررسی کنید."
-    cat /opt/outline/access.txt
-    exit 1
-fi
 
 # نمایش اطلاعات استخراج‌شده
 echo "CERT_SHA256: $CERT_SHA256"
