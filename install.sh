@@ -28,24 +28,19 @@ cd /opt/outline_bot
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/outline_bot.py
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/delete_user.py
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/users_data.json
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/update.sh
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/README.md
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/version.txt
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/install.sh
 
 # بررسی دانلود فایل‌ها
-if [ ! -f "outline_bot.py" ] || [ ! -f "delete_user.py" ] || [ ! -f "users_data.json" ] || [ ! -f "update.sh" ]; then
+if [ ! -f "outline_bot.py" ] || [ ! -f "delete_user.py" ] || [ ! -f "users_data.json" ]; then
     echo "خطا در دانلود فایل‌های ربات. لطفاً اتصال اینترنت را بررسی کنید."
     exit 1
 fi
 
 # اطمینان از مجوز اجرای فایل‌ها
 chmod +x *.py
-chmod +x update.sh
 
 # نصب سرور Outline
 echo "در حال نصب سرور Outline..."
-sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-server/master/src/server_manager/install_scripts/install_server.sh)"
+sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-apps/master/server_manager/install_scripts/install_server.sh)"
 
 # بررسی موفقیت نصب و دریافت API Key
 if [ $? -eq 0 ]; then
@@ -55,91 +50,24 @@ else
     exit 1
 fi
 
+# استخراج مقادیر certSha256 و apiUrl از فایل access.txt
+CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
+OUTLINE_API_URL=$(grep "apiUrl:" /opt/outline/access.txt | awk -F'apiUrl:' '{print $2}')
 
-
-
-
-
-#!/bin/bash
-
-# تنظیم Cloudflare Tunnel
-echo "در حال پیکربندی Cloudflare Tunnel..."
-TUNNEL_NAME="outline-vpn"
-LOCAL_PORT=443
-
-# نصب cloudflared
-if ! command -v cloudflared &> /dev/null; then
-    echo "در حال نصب cloudflared..."
-    curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
-    sudo dpkg -i cloudflared.deb
-    rm -f cloudflared.deb
+# بررسی استخراج موفقیت‌آمیز داده‌ها
+if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
+    echo "خطا در استخراج اطلاعات از فایل access.txt. لطفاً فایل را بررسی کنید."
+    cat /opt/outline/access.txt
+    exit 1
 fi
 
-# ورود به حساب Cloudflare
-echo "ورود به حساب Cloudflare..."
-cloudflared login
-
-# حذف تونل موجود با همین نام (در صورت وجود)
-EXISTING_TUNNEL=$(cloudflared tunnel list | grep $TUNNEL_NAME | awk '{print $1}')
-if [ -n "$EXISTING_TUNNEL" ]; then
-    echo "تونل موجود یافت شد. حذف تونل $TUNNEL_NAME..."
-    cloudflared tunnel delete $TUNNEL_NAME
-fi
-
-# ایجاد تونل جدید
-echo "ایجاد تونل Cloudflare..."
-cloudflared tunnel create $TUNNEL_NAME
-
-# دریافت اطلاعات تونل
-TUNNEL_ID=$(cloudflared tunnel list | grep $TUNNEL_NAME | awk '{print $1}')
-CREDENTIALS_FILE="/root/.cloudflared/${TUNNEL_ID}.json"
-
-# تنظیم فایل پیکربندی تونل
-echo "تنظیم فایل پیکربندی تونل..."
-sudo mkdir -p /etc/cloudflared
-cat <<EOF | sudo tee /etc/cloudflared/config.yml
-tunnel: $TUNNEL_ID
-credentials-file: $CREDENTIALS_FILE
-
-ingress:
-  - hostname: outline.$(hostname).cloudflared.com
-    service: http://localhost:$LOCAL_PORT
-  - service: http_status:404
-EOF
-
-# تنظیم رکورد DNS در Cloudflare
-echo "تنظیم رکورد DNS در Cloudflare..."
-cloudflared tunnel route dns $TUNNEL_NAME outline.$(hostname).cloudflared.com
-
-# ایجاد سرویس Systemd برای تونل
-sudo bash -c "cat > /etc/systemd/system/cloudflared.service" <<EOL
-[Unit]
-Description=Cloudflare Tunnel Service
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/cloudflared --config /etc/cloudflared/config.yml run
-Restart=always
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOL
-
-# فعال‌سازی سرویس تونل
-sudo systemctl daemon-reload
-sudo systemctl enable cloudflared
-sudo systemctl start cloudflared
-
-echo "پیکربندی Cloudflare Tunnel با موفقیت انجام شد!"
-
-
-
+# استخراج OUTLINE_API_KEY از OUTLINE_API_URL
+OUTLINE_API_KEY=$(echo $OUTLINE_API_URL | awk -F'/' '{print $NF}')
 
 # نمایش اطلاعات استخراج‌شده
 echo "CERT_SHA256: $CERT_SHA256"
 echo "OUTLINE_API_URL: $OUTLINE_API_URL"
+echo "OUTLINE_API_KEY: $OUTLINE_API_KEY"
 
 # ایجاد فایل تنظیمات مخفی
 CONFIG_FILE="/opt/outline_bot/.config.json"
@@ -213,7 +141,7 @@ https://s3.amazonaws.com/outline-releases/manager/linux/stable/Outline-Manager.A
 
 # نصب کتابخانه‌های پایتون موردنیاز
 pip install --upgrade pip
-pip install requests python-telegram-bot pytz
+pip install requests python-telegram-bot
 
 # ساخت فایل log برای ذخیره لاگ‌ها
 mkdir -p /opt/outline_bot/logs
@@ -237,20 +165,16 @@ Description=Outline Bot Service
 After=network.target
 
 [Service]
-User=root
+User=$USER
 WorkingDirectory=/opt/outline_bot
 ExecStart=/opt/outline_bot/outline_env/bin/python3 /opt/outline_bot/outline_bot.py
 Restart=always
-TimeoutStopSec=10
-StandardOutput=append:/opt/outline_bot/service.log
-StandardError=append:/opt/outline_bot/service.log
 
 [Install]
 WantedBy=multi-user.target
 EOL
 
 # بارگذاری و فعال‌سازی سرویس
-sudo timedatectl set-timezone Asia/Tehran
 sudo systemctl daemon-reload
 sudo systemctl enable outline_bot.service
 sudo systemctl start outline_bot.service
