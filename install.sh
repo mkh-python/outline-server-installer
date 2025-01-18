@@ -141,7 +141,7 @@ https://s3.amazonaws.com/outline-releases/manager/linux/stable/Outline-Manager.A
 
 # نصب کتابخانه‌های پایتون موردنیاز
 pip install --upgrade pip
-pip install requests python-telegram-bot
+pip install requests python-telegram-bot pytz
 
 # ساخت فایل log برای ذخیره لاگ‌ها
 mkdir -p /opt/outline_bot/logs
@@ -175,6 +175,7 @@ WantedBy=multi-user.target
 EOL
 
 # بارگذاری و فعال‌سازی سرویس
+sudo timedatectl set-timezone Asia/Tehran
 sudo systemctl daemon-reload
 sudo systemctl enable outline_bot.service
 sudo systemctl start outline_bot.service
