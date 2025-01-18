@@ -1,216 +1,80 @@
 #!/bin/bash
 
-# فایل نصب وابستگی‌ها و راه‌اندازی ربات Outline
+# تنظیم Cloudflare Tunnel
+echo "در حال پیکربندی Cloudflare Tunnel..."
+TUNNEL_NAME="outline-vpn"
+LOCAL_PORT=443
+HOSTNAME="outline.$(hostname).cloudflared.com"
 
-# به‌روزرسانی پکیج منیجر و نصب ابزارهای پایه‌ای
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y python3 python3-pip python3-venv curl jq
-
-# نصب Docker
-echo "در حال نصب Docker..."
-sudo apt install -y docker.io
-sudo systemctl start docker
-sudo systemctl enable docker
-
-# ایجاد محیط مجازی پایتون
-echo "ایجاد محیط مجازی..."
-mkdir -p /opt/outline_bot/outline_env
-python3 -m venv /opt/outline_bot/outline_env
-
-# فعال‌سازی محیط مجازی
-source /opt/outline_bot/outline_env/bin/activate
-
-# دانلود فایل‌های ربات
-echo "در حال دانلود فایل‌های مربوط به ربات..."
-mkdir -p /opt/outline_bot
-cd /opt/outline_bot
-
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/outline_bot.py
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/delete_user.py
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/users_data.json
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/update.sh
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/README.md
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/version.txt
-wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/install.sh
-
-# بررسی دانلود فایل‌ها
-if [ ! -f "outline_bot.py" ] || [ ! -f "delete_user.py" ] || [ ! -f "users_data.json" ] || [ ! -f "update.sh" ]; then
-    echo "خطا در دانلود فایل‌های ربات. لطفاً اتصال اینترنت را بررسی کنید."
-    exit 1
+# حذف فایل گواهی قدیمی در صورت وجود
+if [ -f "/root/.cloudflared/cert.pem" ]; then
+    echo "حذف فایل گواهی قدیمی..."
+    sudo rm -f /root/.cloudflared/cert.pem
 fi
 
-# اطمینان از مجوز اجرای فایل‌ها
-chmod +x *.py
-chmod +x update.sh
-
-# نصب سرور Outline
-echo "در حال نصب سرور Outline..."
-sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-server/master/src/server_manager/install_scripts/install_server.sh)"
-
-# بررسی موفقیت نصب و دریافت API Key
-if [ $? -eq 0 ]; then
-    echo "سرور Outline با موفقیت نصب شد."
-else
-    echo "خطا در نصب سرور Outline."
-    exit 1
+# نصب cloudflared در صورت نیاز
+if ! command -v cloudflared &> /dev/null; then
+    echo "در حال نصب cloudflared..."
+    curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+    sudo dpkg -i cloudflared.deb
+    rm -f cloudflared.deb
 fi
 
-# پرسیدن دامین از کاربر
-read -p "آیا دامین دارید؟ (y/n): " HAS_DOMAIN
-if [[ "$HAS_DOMAIN" =~ ^[Yy](es|ES)?$ ]]; then
-    read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
+# ورود به حساب Cloudflare
+echo "ورود به حساب Cloudflare..."
+cloudflared login
 
-    # استخراج IP دامین (فقط IPv4)
-    DOMAIN_IP=$(ping -4 -c 1 "$DOMAIN_NAME" | grep -oP '(\d{1,3}\.){3}\d{1,3}' | head -n 1)
-
-    # استخراج IP سرور (فقط IPv4)
-    SERVER_IP=$(curl -4 -s ifconfig.me)
-
-    # بررسی هماهنگی IP دامین با IP سرور
-    if [ "$DOMAIN_IP" == "$SERVER_IP" ]; then
-        echo "دامین با IP سرور هماهنگ است. ادامه می‌دهیم..."
-        API_URL="https://$DOMAIN_NAME"
-    else
-        echo "خطا: دامین وارد شده با IP سرور هماهنگ نیست. لطفاً بررسی کنید."
-        echo "دامین وارد شده: $DOMAIN_NAME"
-        echo "IP دامین: $DOMAIN_IP"
-        echo "IP سرور: $SERVER_IP"
-        exit 1
-    fi
-else
-    # اگر کاربر دامین نداشت، استفاده از IP سرور
-    SERVER_IP=$(curl -4 -s ifconfig.me)
-    API_URL="https://$SERVER_IP"
+# حذف تونل قدیمی در صورت وجود
+EXISTING_TUNNEL=$(cloudflared tunnel list | grep $TUNNEL_NAME | awk '{print $1}')
+if [ -n "$EXISTING_TUNNEL" ]; then
+    echo "حذف تونل قدیمی $TUNNEL_NAME..."
+    cloudflared tunnel delete $TUNNEL_NAME
 fi
 
-# استخراج مقادیر certSha256 و apiUrl از فایل access.txt
-CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
-OUTLINE_API_URL="$API_URL:$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')"
+# ایجاد تونل جدید
+echo "ایجاد تونل Cloudflare..."
+cloudflared tunnel create $TUNNEL_NAME
 
-# بررسی استخراج موفقیت‌آمیز داده‌ها
-if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
-    echo "خطا در استخراج اطلاعات از فایل access.txt. لطفاً فایل را بررسی کنید."
-    cat /opt/outline/access.txt
-    exit 1
-fi
+# دریافت اطلاعات تونل
+TUNNEL_ID=$(cloudflared tunnel list | grep $TUNNEL_NAME | awk '{print $1}')
+CREDENTIALS_FILE="/root/.cloudflared/${TUNNEL_ID}.json"
 
-# نمایش اطلاعات استخراج‌شده
-echo "CERT_SHA256: $CERT_SHA256"
-echo "OUTLINE_API_URL: $OUTLINE_API_URL"
+# تنظیم فایل پیکربندی تونل
+echo "تنظیم فایل پیکربندی تونل..."
+sudo mkdir -p /etc/cloudflared
+cat <<EOF | sudo tee /etc/cloudflared/config.yml
+tunnel: $TUNNEL_ID
+credentials-file: $CREDENTIALS_FILE
 
-# ایجاد فایل تنظیمات مخفی
-CONFIG_FILE="/opt/outline_bot/.config.json"
-cat <<EOF > $CONFIG_FILE
-{
-    "OUTLINE_API_URL": "$OUTLINE_API_URL",
-    "OUTLINE_API_KEY": "$OUTLINE_API_KEY",
-    "CERT_SHA256": "$CERT_SHA256"
-}
+ingress:
+  - hostname: $HOSTNAME
+    service: http://localhost:$LOCAL_PORT
+  - service: http_status:404
 EOF
-chmod 600 $CONFIG_FILE
 
-# دریافت توکن تلگرام
-read -p "لطفاً توکن ربات تلگرام را وارد کنید: " BOT_TOKEN
+# تنظیم رکورد DNS در Cloudflare
+echo "تنظیم رکورد DNS در Cloudflare..."
+cloudflared tunnel route dns $TUNNEL_NAME $HOSTNAME
 
-# دریافت آیدی مدیران
-ADMIN_IDS=()
-while true; do
-    read -p "لطفاً آیدی عددی مدیر را وارد کنید (یا n برای اتمام): " ADMIN_ID
-    if [ "$ADMIN_ID" = "n" ]; then
-        break
-    fi
-    if [[ ! "$ADMIN_ID" =~ ^[0-9]+$ ]]; then
-        echo "خطا: لطفاً یک آیدی عددی معتبر وارد کنید."
-        continue
-    fi
-    ADMIN_IDS+=("$ADMIN_ID")
-done
-
-if [ ${#ADMIN_IDS[@]} -eq 0 ]; then
-    ADMIN_IDS_STR="[]"
-else
-    ADMIN_IDS_STR=$(printf "%s, " "${ADMIN_IDS[@]}" | sed 's/, $//')
-    ADMIN_IDS_STR="[${ADMIN_IDS_STR}]"
-fi
-
-# ایجاد تنظیمات تلگرام در فایل پیکربندی
-jq ". + { \"BOT_TOKEN\": \"$BOT_TOKEN\", \"ADMIN_IDS\": $ADMIN_IDS_STR }" $CONFIG_FILE > tmp.$$.json && mv tmp.$$.json $CONFIG_FILE
-
-# ارسال پیام خوش‌آمدگویی به تلگرام
-echo -e "${CYAN}Sending welcome message to the user...${RESET}"
-curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-     -d "chat_id=${ADMIN_IDS[0]}" \
-     -d "text=🚀 نصب سرور با موفقیت انجام شد.
-نسخه فعلی: 1.37.3
-
-********
-
-API URL from Outline Server:
-
-{\"apiUrl\":\"$OUTLINE_API_URL\",\"certSha256\":\"$CERT_SHA256\"}
-
-🚀 لطفاً مقادیر بالا را در Outline Manager وارد کنید تا به سرور متصل شوید🚀
-
-🡇 لینک دانلود همه سیستم‌عامل‌ها برای مدیریت سرور و کاربران🡇
-
-**********
-📥لینک دانلود ویندوز🖥️:
-https://s3.amazonaws.com/outline-releases/manager/windows/stable/Outline-Manager.exe
-*******
-📥لینک دانلود مک🍎:
-https://s3.amazonaws.com/outline-releases/manager/macos/stable/Outline-Manager.dmg
-*******
-📥لینک دانلود لینوکس📱:
-https://s3.amazonaws.com/outline-releases/manager/linux/stable/Outline-Manager.AppImage
-*******
-
-با تشکر از نصب شما! لطفاً حمایت ما را فراموش نکنید.
-آیدی پشتیبانی 24 ساعته ربات ما:
-@irannetwork_co"
-
-# نصب کتابخانه‌های پایتون موردنیاز
-pip install --upgrade pip
-pip install requests python-telegram-bot pytz
-
-# ساخت فایل log برای ذخیره لاگ‌ها
-mkdir -p /opt/outline_bot/logs
-touch /opt/outline_bot/logs/bot.log
-
-# اطمینان از دسترسی فایل JSON
-if [ ! -f /opt/outline_bot/users_data.json ]; then
-    echo '{"next_id": 1, "users": {}}' > /opt/outline_bot/users_data.json
-fi
-
-# تنظیم cron job برای حذف کاربران منقضی‌شده
-echo "تنظیم Cron برای حذف کاربران منقضی‌شده..."
-(crontab -l 2>/dev/null; echo "0 0 * * * /opt/outline_bot/outline_env/bin/python3 /opt/outline_bot/delete_user.py") | crontab -
-
-# ایجاد سرویس Systemd برای اجرای خودکار ربات
-SERVICE_FILE="/etc/systemd/system/outline_bot.service"
-
-sudo bash -c "cat > $SERVICE_FILE" <<EOL
+# ایجاد سرویس Systemd برای تونل
+sudo bash -c "cat > /etc/systemd/system/cloudflared.service" <<EOL
 [Unit]
-Description=Outline Bot Service
+Description=Cloudflare Tunnel Service
 After=network.target
 
 [Service]
-User=root
-WorkingDirectory=/opt/outline_bot
-ExecStart=/opt/outline_bot/outline_env/bin/python3 /opt/outline_bot/outline_bot.py
+Type=simple
+ExecStart=/usr/local/bin/cloudflared --config /etc/cloudflared/config.yml run
 Restart=always
-TimeoutStopSec=10
-StandardOutput=append:/opt/outline_bot/service.log
-StandardError=append:/opt/outline_bot/service.log
+User=root
 
 [Install]
 WantedBy=multi-user.target
 EOL
 
-# بارگذاری و فعال‌سازی سرویس
-sudo timedatectl set-timezone Asia/Tehran
+# فعال‌سازی سرویس تونل
 sudo systemctl daemon-reload
-sudo systemctl enable outline_bot.service
-sudo systemctl start outline_bot.service
+sudo systemctl enable cloudflared
+sudo systemctl start cloudflared
 
-# پیام پایان نصب
-echo "نصب و راه‌اندازی ربات و سرور Outline کامل شد. سرویس به صورت خودکار اجرا شده است."
+echo "پیکربندی Cloudflare Tunnel با موفقیت انجام شد!"
