@@ -28,19 +28,24 @@ cd /opt/outline_bot
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/outline_bot.py
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/delete_user.py
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/users_data.json
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/update.sh
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/README.md
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/version.txt
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/install.sh
 
 # بررسی دانلود فایل‌ها
-if [ ! -f "outline_bot.py" ] || [ ! -f "delete_user.py" ] || [ ! -f "users_data.json" ]; then
+if [ ! -f "outline_bot.py" ] || [ ! -f "delete_user.py" ] || [ ! -f "users_data.json" ] || [ ! -f "update.sh" ]; then
     echo "خطا در دانلود فایل‌های ربات. لطفاً اتصال اینترنت را بررسی کنید."
     exit 1
 fi
 
 # اطمینان از مجوز اجرای فایل‌ها
 chmod +x *.py
+chmod +x update.sh
 
 # نصب سرور Outline
 echo "در حال نصب سرور Outline..."
-sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-apps/master/server_manager/install_scripts/install_server.sh)"
+sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-server/master/src/server_manager/install_scripts/install_server.sh)"
 
 # بررسی موفقیت نصب و دریافت API Key
 if [ $? -eq 0 ]; then
@@ -50,9 +55,37 @@ else
     exit 1
 fi
 
+# پرسیدن دامین از کاربر
+read -p "آیا دامین دارید؟ (y/n): " HAS_DOMAIN
+if [[ "$HAS_DOMAIN" =~ ^[Yy](es|ES)?$ ]]; then
+    read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
+
+    # استخراج IP دامین (فقط IPv4)
+    DOMAIN_IP=$(ping -4 -c 1 "$DOMAIN_NAME" | grep -oP '(\d{1,3}\.){3}\d{1,3}' | head -n 1)
+
+    # استخراج IP سرور (فقط IPv4)
+    SERVER_IP=$(curl -4 -s ifconfig.me)
+
+    # بررسی هماهنگی IP دامین با IP سرور
+    if [ "$DOMAIN_IP" == "$SERVER_IP" ]; then
+        echo "دامین با IP سرور هماهنگ است. ادامه می‌دهیم..."
+        API_URL="https://$DOMAIN_NAME"
+    else
+        echo "خطا: دامین وارد شده با IP سرور هماهنگ نیست. لطفاً بررسی کنید."
+        echo "دامین وارد شده: $DOMAIN_NAME"
+        echo "IP دامین: $DOMAIN_IP"
+        echo "IP سرور: $SERVER_IP"
+        exit 1
+    fi
+else
+    # اگر کاربر دامین نداشت، استفاده از IP سرور
+    SERVER_IP=$(curl -4 -s ifconfig.me)
+    API_URL="https://$SERVER_IP"
+fi
+
 # استخراج مقادیر certSha256 و apiUrl از فایل access.txt
 CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
-OUTLINE_API_URL=$(grep "apiUrl:" /opt/outline/access.txt | awk -F'apiUrl:' '{print $2}')
+OUTLINE_API_URL="$API_URL:$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')"
 
 # بررسی استخراج موفقیت‌آمیز داده‌ها
 if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
@@ -61,13 +94,9 @@ if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
     exit 1
 fi
 
-# استخراج OUTLINE_API_KEY از OUTLINE_API_URL
-OUTLINE_API_KEY=$(echo $OUTLINE_API_URL | awk -F'/' '{print $NF}')
-
 # نمایش اطلاعات استخراج‌شده
 echo "CERT_SHA256: $CERT_SHA256"
 echo "OUTLINE_API_URL: $OUTLINE_API_URL"
-echo "OUTLINE_API_KEY: $OUTLINE_API_KEY"
 
 # ایجاد فایل تنظیمات مخفی
 CONFIG_FILE="/opt/outline_bot/.config.json"
@@ -165,10 +194,13 @@ Description=Outline Bot Service
 After=network.target
 
 [Service]
-User=$USER
+User=root
 WorkingDirectory=/opt/outline_bot
 ExecStart=/opt/outline_bot/outline_env/bin/python3 /opt/outline_bot/outline_bot.py
 Restart=always
+TimeoutStopSec=10
+StandardOutput=append:/opt/outline_bot/service.log
+StandardError=append:/opt/outline_bot/service.log
 
 [Install]
 WantedBy=multi-user.target
