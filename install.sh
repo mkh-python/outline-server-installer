@@ -80,9 +80,6 @@ cat <<EOF > $CONFIG_FILE
 EOF
 chmod 600 $CONFIG_FILE
 
-
-#!/bin/bash
-
 # تنظیم Cloudflare Tunnel
 echo "در حال پیکربندی Cloudflare Tunnel..."
 TUNNEL_NAME="outline-vpn"
