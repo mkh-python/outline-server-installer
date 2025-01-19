@@ -28,19 +28,24 @@ cd /opt/outline_bot
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/outline_bot.py
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/delete_user.py
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/users_data.json
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/update.sh
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/README.md
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/version.txt
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/install.sh
 
 # بررسی دانلود فایل‌ها
-if [ ! -f "outline_bot.py" ] || [ ! -f "delete_user.py" ] || [ ! -f "users_data.json" ]; then
+if [ ! -f "outline_bot.py" ] || [ ! -f "delete_user.py" ] || [ ! -f "users_data.json" ] || [ ! -f "update.sh" ]; then
     echo "خطا در دانلود فایل‌های ربات. لطفاً اتصال اینترنت را بررسی کنید."
     exit 1
 fi
 
 # اطمینان از مجوز اجرای فایل‌ها
 chmod +x *.py
+chmod +x update.sh
 
 # نصب سرور Outline
 echo "در حال نصب سرور Outline..."
-sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-apps/master/server_manager/install_scripts/install_server.sh)"
+sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-server/master/src/server_manager/install_scripts/install_server.sh)"
 
 # بررسی موفقیت نصب و دریافت API Key
 if [ $? -eq 0 ]; then
@@ -50,9 +55,37 @@ else
     exit 1
 fi
 
+# پرسیدن دامین از کاربر
+read -p "آیا دامین دارید؟ (y/n): " HAS_DOMAIN
+if [[ "$HAS_DOMAIN" =~ ^[Yy](es|ES)?$ ]]; then
+    read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
+
+    # استخراج IP دامین (فقط IPv4)
+    DOMAIN_IP=$(ping -4 -c 1 "$DOMAIN_NAME" | grep -oP '(\d{1,3}\.){3}\d{1,3}' | head -n 1)
+
+    # استخراج IP سرور (فقط IPv4)
+    SERVER_IP=$(curl -4 -s ifconfig.me)
+
+    # بررسی هماهنگی IP دامین با IP سرور
+    if [ "$DOMAIN_IP" == "$SERVER_IP" ]; then
+        echo "دامین با IP سرور هماهنگ است. ادامه می‌دهیم..."
+        API_URL="https://$DOMAIN_NAME"
+    else
+        echo "خطا: دامین وارد شده با IP سرور هماهنگ نیست. لطفاً بررسی کنید."
+        echo "دامین وارد شده: $DOMAIN_NAME"
+        echo "IP دامین: $DOMAIN_IP"
+        echo "IP سرور: $SERVER_IP"
+        exit 1
+    fi
+else
+    # اگر کاربر دامین نداشت، استفاده از IP سرور
+    SERVER_IP=$(curl -4 -s ifconfig.me)
+    API_URL="https://$SERVER_IP"
+fi
+
 # استخراج مقادیر certSha256 و apiUrl از فایل access.txt
 CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
-OUTLINE_API_URL=$(grep "apiUrl:" /opt/outline/access.txt | awk -F'apiUrl:' '{print $2}')
+OUTLINE_API_URL="$API_URL:$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')"
 
 # بررسی استخراج موفقیت‌آمیز داده‌ها
 if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
@@ -61,13 +94,9 @@ if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
     exit 1
 fi
 
-# استخراج OUTLINE_API_KEY از OUTLINE_API_URL
-OUTLINE_API_KEY=$(echo $OUTLINE_API_URL | awk -F'/' '{print $NF}')
-
 # نمایش اطلاعات استخراج‌شده
 echo "CERT_SHA256: $CERT_SHA256"
 echo "OUTLINE_API_URL: $OUTLINE_API_URL"
-echo "OUTLINE_API_KEY: $OUTLINE_API_KEY"
 
 # ایجاد فایل تنظیمات مخفی
 CONFIG_FILE="/opt/outline_bot/.config.json"
@@ -79,87 +108,6 @@ cat <<EOF > $CONFIG_FILE
 }
 EOF
 chmod 600 $CONFIG_FILE
-
-# تنظیم Cloudflare Tunnel
-echo "در حال پیکربندی Cloudflare Tunnel..."
-TUNNEL_NAME="outline-vpn"
-LOCAL_PORT=443
-HOSTNAME="outline.$(hostname).cloudflared.com"
-
-# حذف فایل گواهی قدیمی در صورت وجود
-if [ -f "/root/.cloudflared/cert.pem" ]; then
-    echo "حذف فایل گواهی قدیمی..."
-    sudo rm -f /root/.cloudflared/cert.pem
-fi
-
-# نصب cloudflared در صورت نیاز
-if ! command -v cloudflared &> /dev/null; then
-    echo "در حال نصب cloudflared..."
-    curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
-    sudo dpkg -i cloudflared.deb
-    rm -f cloudflared.deb
-fi
-
-# ورود به حساب Cloudflare
-echo "ورود به حساب Cloudflare..."
-cloudflared login
-
-# حذف تونل قدیمی در صورت وجود
-EXISTING_TUNNEL=$(cloudflared tunnel list | grep $TUNNEL_NAME | awk '{print $1}')
-if [ -n "$EXISTING_TUNNEL" ]; then
-    echo "حذف تونل قدیمی $TUNNEL_NAME..."
-    cloudflared tunnel delete $TUNNEL_NAME
-fi
-
-# ایجاد تونل جدید
-echo "ایجاد تونل Cloudflare..."
-cloudflared tunnel create $TUNNEL_NAME
-
-# دریافت اطلاعات تونل
-TUNNEL_ID=$(cloudflared tunnel list | grep $TUNNEL_NAME | awk '{print $1}')
-CREDENTIALS_FILE="/root/.cloudflared/${TUNNEL_ID}.json"
-
-# تنظیم فایل پیکربندی تونل
-echo "تنظیم فایل پیکربندی تونل..."
-sudo mkdir -p /etc/cloudflared
-cat <<EOF | sudo tee /etc/cloudflared/config.yml
-tunnel: $TUNNEL_ID
-credentials-file: $CREDENTIALS_FILE
-
-ingress:
-  - hostname: $HOSTNAME
-    service: http://localhost:$LOCAL_PORT
-  - service: http_status:404
-EOF
-
-# تنظیم رکورد DNS در Cloudflare
-echo "تنظیم رکورد DNS در Cloudflare..."
-cloudflared tunnel route dns $TUNNEL_NAME $HOSTNAME
-
-# ایجاد سرویس Systemd برای تونل
-sudo bash -c "cat > /etc/systemd/system/cloudflared.service" <<EOL
-[Unit]
-Description=Cloudflare Tunnel Service
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/cloudflared --config /etc/cloudflared/config.yml run
-Restart=always
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOL
-
-# فعال‌سازی سرویس تونل
-sudo systemctl daemon-reload
-sudo systemctl enable cloudflared
-sudo systemctl start cloudflared
-
-echo "پیکربندی Cloudflare Tunnel با موفقیت انجام شد!"
-
-
 
 # دریافت توکن تلگرام
 read -p "لطفاً توکن ربات تلگرام را وارد کنید: " BOT_TOKEN
@@ -246,10 +194,13 @@ Description=Outline Bot Service
 After=network.target
 
 [Service]
-User=$USER
+User=root
 WorkingDirectory=/opt/outline_bot
 ExecStart=/opt/outline_bot/outline_env/bin/python3 /opt/outline_bot/outline_bot.py
 Restart=always
+TimeoutStopSec=10
+StandardOutput=append:/opt/outline_bot/service.log
+StandardError=append:/opt/outline_bot/service.log
 
 [Install]
 WantedBy=multi-user.target
