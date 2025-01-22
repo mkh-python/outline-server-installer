@@ -1,5 +1,9 @@
 import logging
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import MessageHandler, filters
+from telegram.ext import CallbackQueryHandler
+
+
 import requests
 import subprocess
 import urllib3
@@ -18,6 +22,8 @@ from telegram.ext import (
 )
 import os
 import sys
+import zipfile
+
 
 LOCK_FILE = "/tmp/outline_bot.lock"
 
@@ -89,10 +95,220 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
         ["🆕 ایجاد کاربر", "👥 مشاهده کاربران"],
         ["❌ حذف کاربر", "💬 درخواست پشتیبانی"],
-        ["🔄 دریافت آخرین آپدیت", "🎯 دریافت اکانت تست"]
+        ["🔄 دریافت آخرین آپدیت", "🎯 دریافت اکانت تست"],
+        ["📂 پشتیبان‌گیری"]
     ],
     resize_keyboard=True,
 )
+
+# منوی پشتیبان‌گیری
+BACKUP_MENU_KEYBOARD = ReplyKeyboardMarkup(
+    [
+        ["📥 بکاپ", "📤 ریستور"],  # دکمه‌های بکاپ و ریستور
+        ["🔙 بازگشت"]  # دکمه بازگشت
+    ],
+    resize_keyboard=True
+)
+
+
+# تابع برای نمایش منوی پشتیبان‌گیری
+async def show_backup_menu(update, context):
+    await update.message.reply_text(
+        "لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+        reply_markup=BACKUP_MENU_KEYBOARD
+    )
+
+async def backup_files(update, context):
+    backup_path = "/opt/outline_bot/backup_restore/backup_file"
+    os.makedirs(backup_path, exist_ok=True)
+
+    # فایل‌هایی که باید بکاپ گرفته شوند
+    files_to_backup = [
+        "/opt/outline_bot/users_data.json",
+        "/opt/outline/persisted-state/shadowbox_config.json",
+        "/opt/outline/persisted-state/outline-ss-server/config.yml"
+    ]
+
+    # نام فایل ZIP
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    backup_file = os.path.join(backup_path, f"backup_{timestamp}.zip")
+
+    try:
+        # فشرده‌سازی فایل‌ها
+        with zipfile.ZipFile(backup_file, "w") as zipf:
+            for file_path in files_to_backup:
+                if os.path.exists(file_path):
+                    zipf.write(file_path, os.path.basename(file_path))
+                    backup_logger.info(f"File {file_path} added to backup.")
+                else:
+                    backup_logger.warning(f"File {file_path} does not exist.")
+        
+        await update.message.reply_text("بکاپ با موفقیت ایجاد شد!")
+        backup_logger.info(f"Backup created successfully at {backup_file}")
+    except Exception as e:
+        await update.message.reply_text("خطایی در ایجاد بکاپ رخ داد!")
+        backup_logger.error(f"Error creating backup: {str(e)}")
+
+
+
+async def restore_files(update, context):
+    backup_path = "/opt/outline_bot/backup_restore/backup_file"
+    if not os.path.exists(backup_path):
+        await update.message.reply_text("هیچ بکاپی موجود نیست!")
+        backup_logger.warning("No backup files found.")
+        return
+
+    # لیست فایل‌های بکاپ
+    backup_files = os.listdir(backup_path)
+    if not backup_files:
+        await update.message.reply_text("هیچ بکاپی موجود نیست!")
+        backup_logger.warning("No backup files in backup directory.")
+        return
+
+    # ایجاد دکمه‌های اینلاین برای فایل‌ها
+    keyboard = [[InlineKeyboardButton(file, callback_data=f"restore_{file}")] for file in backup_files]
+    keyboard.append([InlineKeyboardButton("ارسال فایل از سیستم", callback_data="upload_backup")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("لطفاً یک فایل برای ریستور انتخاب کنید:", reply_markup=reply_markup)
+    backup_logger.info(f"Available backups listed for restore: {backup_files}")
+
+async def prompt_upload_backup(update):
+    await update.callback_query.message.reply_text(
+        "لطفاً فایل بکاپ خود را ارسال کنید. فایل باید فرمت ZIP داشته باشد."
+    )
+
+
+
+async def handle_uploaded_backup(update, context):
+    try:
+        # بررسی وجود پیام
+        if not update.message or not update.message.document:
+            await update.message.reply_text("فایل معتبر ارسال نشده است.")
+            backup_logger.error("No valid file found in the update.")
+            return
+
+        # دریافت فایل از پیام
+        file = update.message.document
+        if not file.file_name.endswith(".zip"):
+            await update.message.reply_text("فایل ارسالی باید با فرمت ZIP باشد.")
+            return
+
+        # دریافت فایل از تلگرام
+        tg_file = await file.get_file()
+
+        # مسیر ذخیره‌سازی فایل
+        restore_path = "/opt/outline_bot/backup_restore/restore_file"
+        os.makedirs(restore_path, exist_ok=True)
+
+        file_path = os.path.join(restore_path, file.file_name)
+
+        # دانلود فایل و ذخیره آن
+        await tg_file.download_to_drive(file_path)
+
+        # اطلاع‌رسانی به کاربر
+        await update.message.reply_text("فایل با موفقیت دریافت شد. در حال ریستور بکاپ هستیم...")
+
+        # اجرای عملیات ریستور
+        await restore_selected_file(file.file_name, update)
+
+    except AttributeError as e:
+        if update and update.message:
+            await update.message.reply_text("خطای AttributeError: پیام یا فایل معتبر یافت نشد.")
+        backup_logger.error(f"AttributeError while handling uploaded backup: {str(e)}")
+    except Exception as e:
+        if update and update.message:
+            await update.message.reply_text("خطا در دریافت و ریستور فایل بکاپ!")
+        backup_logger.error(f"Error handling uploaded backup: {str(e)}")
+
+
+
+async def back_to_main(update, context):
+    await update.message.reply_text("بازگشت به منوی اصلی:", reply_markup=MAIN_KEYBOARD)
+
+async def handle_restore_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    # استخراج داده از callback_data
+    callback_data = query.data
+    if callback_data.startswith("restore_"):
+        # عملیات ریستور فایل انتخاب‌شده
+        file_name = callback_data.replace("restore_", "")
+        await restore_selected_file(file_name, update)
+    elif callback_data == "upload_backup":
+        # راه‌اندازی ارسال فایل توسط کاربر
+        await prompt_upload_backup(update)
+
+async def restore_selected_file(file_name, update):
+    try:
+        restore_path = "/opt/outline_bot/backup_restore/restore_file"
+        backup_file_path = os.path.join(restore_path, file_name)
+
+        # بررسی وجود فایل بکاپ
+        if not os.path.exists(backup_file_path):
+            await update.message.reply_text(f"فایل بکاپ {file_name} یافت نشد.")
+            backup_logger.error(f"Backup file {file_name} not found in {restore_path}.")
+            return
+
+        # مسیر فایل‌های اصلی
+        target_paths = {
+            "users_data.json": "/opt/outline_bot/users_data.json",
+            "shadowbox_config.json": "/opt/outline/persisted-state/shadowbox_config.json",
+            "config.yml": "/opt/outline/persisted-state/outline-ss-server/config.yml",
+        }
+
+        # استخراج فایل‌ها
+        with zipfile.ZipFile(backup_file_path, 'r') as zip_ref:
+            zip_ref.extractall(restore_path)
+
+        # انتقال فایل‌ها به مسیرهای اصلی
+        for extracted_file in zip_ref.namelist():
+            if extracted_file in target_paths:
+                source = os.path.join(restore_path, extracted_file)
+                destination = target_paths[extracted_file]
+                os.replace(source, destination)
+
+        await update.message.reply_text(f"ریستور فایل {file_name} با موفقیت انجام شد!")
+        backup_logger.info(f"Restore completed for {file_name}")
+
+    except Exception as e:
+        await update.message.reply_text("خطا در فرآیند ریستور.")
+        backup_logger.error(f"Error restoring file {file_name}: {str(e)}")
+
+
+
+
+# تنظیمات مسیر لاگ
+log_dir = "/opt/outline_bot/logs"
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, "backup_restore.log")
+
+
+# غیرفعال کردن لاگ‌های عمومی
+logging.basicConfig(
+    level=logging.CRITICAL  # تنها لاگ‌های بحرانی نمایش داده شوند
+)
+
+# تنظیمات لاگ اختصاصی برای پشتیبان‌گیری
+backup_logger = logging.getLogger("backup_restore")
+backup_logger.setLevel(logging.DEBUG)
+
+# افزودن خروجی کنسول برای لاگ‌های پشتیبان‌گیری
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.DEBUG)
+console_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+console_handler.setFormatter(console_formatter)
+
+backup_logger.addHandler(console_handler)
+
+
+
+
+
+
+
+
 
 # هندلر دریافت اکانت تست
 async def create_test_account(update: Update, context: CallbackContext):
@@ -344,8 +560,12 @@ def load_user_data():
         return initial_data
 
 def save_user_data(data):
-    with open(DATA_FILE, "w") as file:
-        json.dump(data, file, indent=4)
+    try:
+        with open(DATA_FILE, "w") as file:
+            json.dump(data, file, indent=4)
+        logger.info("Users data saved successfully.")
+    except Exception as e:
+        logger.error(f"Error saving users data: {str(e)}")
 
 # بررسی کاربران منقضی‌شده
 def check_expired_users():
@@ -660,6 +880,16 @@ def main():
     application.add_handler(MessageHandler(filters.Regex("^💬 درخواست پشتیبانی$"), support_request))
     application.add_handler(MessageHandler(filters.Regex("^🔄 دریافت آخرین آپدیت$"), check_for_update))
     application.add_handler(MessageHandler(filters.Regex("^🎯 دریافت اکانت تست$"), create_test_account))
+
+
+    # هندلر برای کلیک روی "📂 پشتیبان‌گیری"
+    application.add_handler(MessageHandler(filters.Text(["📂 پشتیبان‌گیری"]), show_backup_menu))
+    application.add_handler(MessageHandler(filters.Text(["📥 بکاپ"]), backup_files))
+    application.add_handler(MessageHandler(filters.Text(["📤 ریستور"]), restore_files))
+    application.add_handler(MessageHandler(filters.Text(["🔙 بازگشت"]), back_to_main))
+    application.add_handler(CallbackQueryHandler(handle_restore_callback))
+    application.add_handler(MessageHandler(filters.Document.FileExtension("zip"), handle_uploaded_backup))
+
 
     # هندلرهای اصلی
     application.add_handler(CommandHandler("start", start))
