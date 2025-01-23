@@ -2,6 +2,8 @@ import logging
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import MessageHandler, filters
 from telegram.ext import CallbackQueryHandler
+import signal
+import asyncio
 
 
 import requests
@@ -142,9 +144,18 @@ async def backup_files(update, context):
                     backup_logger.info(f"File {file_path} added to backup.")
                 else:
                     backup_logger.warning(f"File {file_path} does not exist.")
-        
+
         await update.message.reply_text("بکاپ با موفقیت ایجاد شد!")
         backup_logger.info(f"Backup created successfully at {backup_file}")
+
+        # ارسال فایل بکاپ به تلگرام
+        with open(backup_file, "rb") as f:
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=f,
+                filename=f"backup_{timestamp}.zip",
+                caption="📂 فایل بکاپ ایجاد شده و در اینجا ارسال می‌شود."
+            )
     except Exception as e:
         await update.message.reply_text("خطایی در ایجاد بکاپ رخ داد!")
         backup_logger.error(f"Error creating backup: {str(e)}")
@@ -153,39 +164,45 @@ async def backup_files(update, context):
 
 async def restore_files(update, context):
     backup_path = "/opt/outline_bot/backup_restore/backup_file"
-    if not os.path.exists(backup_path):
-        await update.message.reply_text("هیچ بکاپی موجود نیست!")
-        backup_logger.warning("No backup files found.")
-        return
+    os.makedirs(backup_path, exist_ok=True)
 
     # لیست فایل‌های بکاپ
     backup_files = os.listdir(backup_path)
-    if not backup_files:
-        await update.message.reply_text("هیچ بکاپی موجود نیست!")
-        backup_logger.warning("No backup files in backup directory.")
-        return
+    backup_files.sort(key=lambda x: datetime.strptime(x, "backup_%Y-%m-%d_%H-%M-%S.zip"), reverse=False)
 
-    # ایجاد دکمه‌های اینلاین برای فایل‌ها
-    keyboard = [[InlineKeyboardButton(file, callback_data=f"restore_{file}")] for file in backup_files]
+    # ایجاد دکمه‌های اینلاین
+    keyboard = []
+
+    if backup_files:
+        # دکمه‌ها برای فایل‌های موجود
+        keyboard.extend([[InlineKeyboardButton(file, callback_data=f"restore_{file}")] for file in backup_files])
+    else:
+        # پیام برای زمانی که هیچ بکاپی وجود ندارد
+        await update.message.reply_text("❌ هیچ بکاپی در سرور ندارد.")
+    
+    # دکمه ارسال فایل از سیستم همیشه اضافه می‌شود
     keyboard.append([InlineKeyboardButton("ارسال فایل از سیستم", callback_data="upload_backup")])
 
+    # نمایش دکمه‌ها
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("لطفاً یک فایل برای ریستور انتخاب کنید:", reply_markup=reply_markup)
     backup_logger.info(f"Available backups listed for restore: {backup_files}")
 
-async def prompt_upload_backup(update):
-    await update.callback_query.message.reply_text(
-        "لطفاً فایل بکاپ خود را ارسال کنید. فایل باید فرمت ZIP داشته باشد."
-    )
-
-
+async def prompt_upload_backup(update: Update, context: CallbackContext):
+    try:
+        # ارسال پیام برای آپلود فایل
+        await update.callback_query.message.reply_text(
+            "📤 لطفاً فایل بکاپ خود را ارسال کنید. فایل باید فرمت ZIP داشته باشد.\n"
+            "⏬ منتظر بارگذاری فایل شما هستیم...",
+        )
+    except Exception as e:
+        backup_logger.error(f"Error prompting for backup upload: {str(e)}")
 
 async def handle_uploaded_backup(update, context):
     try:
-        # بررسی وجود پیام
+        # بررسی وجود پیام و فایل
         if not update.message or not update.message.document:
-            await update.message.reply_text("فایل معتبر ارسال نشده است.")
-            backup_logger.error("No valid file found in the update.")
+            await update.message.reply_text("فایل معتبری ارسال نشده است.")
             return
 
         # دریافت فایل از پیام
@@ -200,25 +217,17 @@ async def handle_uploaded_backup(update, context):
         # مسیر ذخیره‌سازی فایل
         restore_path = "/opt/outline_bot/backup_restore/restore_file"
         os.makedirs(restore_path, exist_ok=True)
-
         file_path = os.path.join(restore_path, file.file_name)
 
         # دانلود فایل و ذخیره آن
         await tg_file.download_to_drive(file_path)
+        await update.message.reply_text("✅ فایل با موفقیت دریافت شد. در حال ریستور بکاپ هستیم...")
 
-        # اطلاع‌رسانی به کاربر
-        await update.message.reply_text("فایل با موفقیت دریافت شد. در حال ریستور بکاپ هستیم...")
+        # ریستور فایل آپلودشده
+        await restore_selected_file(file.file_name, update, from_user_upload=True)
 
-        # اجرای عملیات ریستور
-        await restore_selected_file(file.file_name, update)
-
-    except AttributeError as e:
-        if update and update.message:
-            await update.message.reply_text("خطای AttributeError: پیام یا فایل معتبر یافت نشد.")
-        backup_logger.error(f"AttributeError while handling uploaded backup: {str(e)}")
     except Exception as e:
-        if update and update.message:
-            await update.message.reply_text("خطا در دریافت و ریستور فایل بکاپ!")
+        await update.message.reply_text("❌ خطا در دریافت و ریستور فایل بکاپ!")
         backup_logger.error(f"Error handling uploaded backup: {str(e)}")
 
 
@@ -233,22 +242,30 @@ async def handle_restore_callback(update, context):
     # استخراج داده از callback_data
     callback_data = query.data
     if callback_data.startswith("restore_"):
-        # عملیات ریستور فایل انتخاب‌شده
+        # عملیات ریستور فایل انتخاب‌شده از لیست
         file_name = callback_data.replace("restore_", "")
-        await restore_selected_file(file_name, update)
+        await restore_selected_file(file_name, update, from_user_upload=False)
     elif callback_data == "upload_backup":
         # راه‌اندازی ارسال فایل توسط کاربر
-        await prompt_upload_backup(update)
+        await prompt_upload_backup(update, context)
 
-async def restore_selected_file(file_name, update):
+
+async def restore_selected_file(file_name, update, from_user_upload=False):
     try:
-        restore_path = "/opt/outline_bot/backup_restore/restore_file"
+        # تعیین مسیر بر اساس نوع درخواست
+        if from_user_upload:
+            restore_path = "/opt/outline_bot/backup_restore/restore_file"
+        else:
+            restore_path = "/opt/outline_bot/backup_restore/backup_file"
+
         backup_file_path = os.path.join(restore_path, file_name)
 
         # بررسی وجود فایل بکاپ
         if not os.path.exists(backup_file_path):
-            await update.message.reply_text(f"فایل بکاپ {file_name} یافت نشد.")
-            backup_logger.error(f"Backup file {file_name} not found in {restore_path}.")
+            if update.callback_query and update.callback_query.message:
+                await update.callback_query.message.reply_text(f"فایل بکاپ {file_name} یافت نشد.")
+            else:
+                raise ValueError("هیچ پیام یا callback_query معتبری موجود نیست.")
             return
 
         # مسیر فایل‌های اصلی
@@ -269,13 +286,39 @@ async def restore_selected_file(file_name, update):
                 destination = target_paths[extracted_file]
                 os.replace(source, destination)
 
-        await update.message.reply_text(f"ریستور فایل {file_name} با موفقیت انجام شد!")
-        backup_logger.info(f"Restore completed for {file_name}")
+        # پیام موفقیت ریستور
+        if update.message:
+            await update.message.reply_text(f"ریستور فایل {file_name} با موفقیت انجام شد!")
+        elif update.callback_query and update.callback_query.message:
+            await update.callback_query.message.reply_text(f"ریستور فایل {file_name} با موفقیت انجام شد!")
+        else:
+            backup_logger.error("هیچ پیام یا callback_query معتبری برای ارسال پیام موفقیت موجود نیست.")
+
+        # ریستارت سرویس‌ها
+        await update.callback_query.message.reply_text("♻️ در حال ریستارت سرویس‌ها، لطفاً منتظر بمانید...")
+        try:
+            subprocess.run(["docker", "start", "shadowbox"], check=True)
+            subprocess.run(["docker", "start", "watchtower"], check=True)
+            subprocess.run(["sudo", "systemctl", "restart", "outline_bot.service"], check=True)
+            await update.callback_query.message.reply_text("✅ سرویس‌ها با موفقیت ریستارت شدند!")
+            backup_logger.info("Services restarted successfully.")
+        except subprocess.CalledProcessError as e:
+            await update.callback_query.message.reply_text("❌ خطا در ریستارت سرویس‌ها!")
+            backup_logger.error(f"Error restarting services: {str(e)}")
 
     except Exception as e:
-        await update.message.reply_text("خطا در فرآیند ریستور.")
+        # مدیریت خطا
+        if update.callback_query and update.callback_query.message:
+            await update.callback_query.message.reply_text("خطا در فرآیند ریستور.")
         backup_logger.error(f"Error restoring file {file_name}: {str(e)}")
 
+
+def graceful_shutdown(*args):
+    logger.info("Shutting down gracefully...")
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, graceful_shutdown)
+signal.signal(signal.SIGINT, graceful_shutdown)
 
 
 
@@ -301,13 +344,6 @@ console_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s
 console_handler.setFormatter(console_formatter)
 
 backup_logger.addHandler(console_handler)
-
-
-
-
-
-
-
 
 
 # هندلر دریافت اکانت تست
