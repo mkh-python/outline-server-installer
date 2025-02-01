@@ -133,6 +133,39 @@ else
     ADMIN_IDS_STR="[${ADMIN_IDS_STR}]"
 fi
 
+# دریافت لینک کانال برای بکاپ خودکار
+while true; do
+    read -p "لطفاً لینک کانال تلگرام خود را برای بکاپ خودکار وارد کنید (عمومی یا خصوصی): " BACKUP_CHANNEL
+
+    # بررسی فرمت لینک عمومی (@chanelname) یا خصوصی (https://t.me/+...)
+    if [[ "$BACKUP_CHANNEL" =~ ^@([a-zA-Z0-9_]{5,32})$ ]]; then
+        echo "✅ کانال عمومی تایید شد: $BACKUP_CHANNEL"
+        BACKUP_CHANNEL_ID="null"  # نیازی به آیدی عددی برای کانال عمومی نیست
+        break
+    elif [[ "$BACKUP_CHANNEL" =~ ^https://t.me/\+[a-zA-Z0-9_-]+$ ]]; then
+        echo "✅ لینک کانال خصوصی تایید شد: $BACKUP_CHANNEL"
+        
+        # درخواست آیدی عددی کانال خصوصی
+        while true; do
+            read -p "🔢 لطفاً آیدی عددی کانال خصوصی خود را وارد کنید (مانند -1001234567890): " BACKUP_CHANNEL_ID
+            
+            if [[ "$BACKUP_CHANNEL_ID" =~ ^-100[0-9]{9,10}$ ]]; then
+                echo "✅ آیدی عددی تایید شد: $BACKUP_CHANNEL_ID"
+                break
+            else
+                echo "❌ خطا: لطفاً آیدی عددی معتبر وارد کنید."
+            fi
+        done
+        break
+    else
+        echo "❌ خطا: فرمت لینک وارد شده صحیح نیست. لطفاً مجدداً تلاش کنید."
+    fi
+done
+
+# ذخیره اطلاعات در فایل تنظیمات
+jq ". + { \"BOT_TOKEN\": \"$BOT_TOKEN\", \"ADMIN_IDS\": $ADMIN_IDS_STR, \"BACKUP_CHANNEL\": \"$BACKUP_CHANNEL\", \"BACKUP_CHANNEL_ID\": \"$BACKUP_CHANNEL_ID\" }" $CONFIG_FILE > tmp.$$.json && mv tmp.$$.json $CONFIG_FILE
+
+
 # ایجاد تنظیمات تلگرام در فایل پیکربندی
 jq ". + { \"BOT_TOKEN\": \"$BOT_TOKEN\", \"ADMIN_IDS\": $ADMIN_IDS_STR }" $CONFIG_FILE > tmp.$$.json && mv tmp.$$.json $CONFIG_FILE
 
