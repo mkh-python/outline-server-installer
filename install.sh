@@ -165,7 +165,6 @@ done
 CONFIG_FILE="/opt/outline_bot/.config.json"
 jq ". + { \"BOT_TOKEN\": \"$BOT_TOKEN\", \"ADMIN_IDS\": $ADMIN_IDS_STR, \"BACKUP_CHANNEL\": \"$BACKUP_CHANNEL\", \"BACKUP_CHANNEL_ID\": \"$BACKUP_CHANNEL_ID\" }" $CONFIG_FILE > tmp.$$.json && mv tmp.$$.json $CONFIG_FILE
 
-BACKUP_CHANNEL=$(jq -r '.BACKUP_CHANNEL' $CONFIG_FILE | sed 's/ //g')
 
 
 # ارسال پیام خوش‌آمدگویی به تلگرام
@@ -196,7 +195,6 @@ https://s3.amazonaws.com/outline-releases/manager/macos/stable/Outline-Manager.d
 https://s3.amazonaws.com/outline-releases/manager/linux/stable/Outline-Manager.AppImage
 *******
 
-📢 کانال بکاپ انتخاب شده: ${BACKUP_CHANNEL}
 
 📂 لطفاً اطمینان حاصل کنید که ربات در این کانال به عنوان **ادمین** اضافه شده است تا بتواند بکاپ‌ها را ارسال کند.
 
