@@ -165,6 +165,7 @@ done
 CONFIG_FILE="/opt/outline_bot/.config.json"
 jq ". + { \"BOT_TOKEN\": \"$BOT_TOKEN\", \"ADMIN_IDS\": $ADMIN_IDS_STR, \"BACKUP_CHANNEL\": \"$BACKUP_CHANNEL\", \"BACKUP_CHANNEL_ID\": \"$BACKUP_CHANNEL_ID\" }" $CONFIG_FILE > tmp.$$.json && mv tmp.$$.json $CONFIG_FILE
 
+BACKUP_CHANNEL=$(jq -r '.BACKUP_CHANNEL' $CONFIG_FILE)
 
 # ارسال پیام خوش‌آمدگویی به تلگرام
 echo -e "${CYAN}Sending welcome message to the user...${RESET}"
