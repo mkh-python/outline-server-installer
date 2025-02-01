@@ -165,6 +165,7 @@ done
 CONFIG_FILE="/opt/outline_bot/.config.json"
 jq ". + { \"BOT_TOKEN\": \"$BOT_TOKEN\", \"ADMIN_IDS\": $ADMIN_IDS_STR, \"BACKUP_CHANNEL\": \"$BACKUP_CHANNEL\", \"BACKUP_CHANNEL_ID\": \"$BACKUP_CHANNEL_ID\" }" $CONFIG_FILE > tmp.$$.json && mv tmp.$$.json $CONFIG_FILE
 
+
 # ارسال پیام خوش‌آمدگویی به تلگرام
 echo -e "${CYAN}Sending welcome message to the user...${RESET}"
 curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
@@ -194,7 +195,9 @@ https://s3.amazonaws.com/outline-releases/manager/linux/stable/Outline-Manager.A
 *******
 
 📢 کانال بکاپ انتخاب شده: ${BACKUP_CHANNEL}
+
 📂 لطفاً اطمینان حاصل کنید که ربات در این کانال به عنوان **ادمین** اضافه شده است تا بتواند بکاپ‌ها را ارسال کند.
+
 
 با تشکر از نصب شما! لطفاً حمایت ما را فراموش نکنید.
 آیدی پشتیبانی 24 ساعته ربات ما:
