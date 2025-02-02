@@ -55,6 +55,9 @@ else
     exit 1
 fi
 
+# دریافت دامین از کاربر
+read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
+
 # نصب و تنظیم Cloudflare Tunnel
 echo "📢 در حال نصب Cloudflare Tunnel..."
 curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
@@ -80,23 +83,23 @@ cat <<EOF > ~/.cloudflared/config.yml
 tunnel: $TUNNEL_ID
 credentials-file: /root/.cloudflared/$TUNNEL_ID.json
 ingress:
-  - hostname: vpnmkh.com
+  - hostname: $DOMAIN_NAME
     service: http://127.0.0.1:443
   - service: http_status:404
 EOF
 
 # اتصال تونل به دامنه Cloudflare
-cloudflared tunnel route dns $TUNNEL_ID vpnmkh.com
+cloudflared tunnel route dns $TUNNEL_ID $DOMAIN_NAME
 cloudflared service install
 sudo systemctl start cloudflared
 sudo systemctl enable cloudflared
 
 # نمایش اطلاعات
-echo "✅ Cloudflare Tunnel برای دامنه vpnmkh.com با موفقیت راه‌اندازی شد!"
+echo "✅ Cloudflare Tunnel برای دامنه $DOMAIN_NAME با موفقیت راه‌اندازی شد!"
 
 # استخراج مقادیر certSha256 و apiUrl از فایل access.txt
 CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
-OUTLINE_API_URL="https://vpnmkh.com:$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')"
+OUTLINE_API_URL="https://$DOMAIN_NAME:$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')"
 
 # بررسی استخراج موفقیت‌آمیز داده‌ها
 if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
