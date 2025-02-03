@@ -8,6 +8,7 @@ import signal
 import asyncio
 
 import requests
+import re
 import subprocess
 import urllib3
 from threading import Timer
@@ -159,10 +160,15 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
 BACKUP_MENU_KEYBOARD = ReplyKeyboardMarkup(
     [
         ["📥 بکاپ", "📤 ریستور"],
+        ["📡 نمایش کانال بکاپ خودکار"],
+        ["📤 روشن‌کردن بکاپ خودکار", "⛔ خاموش‌کردن بکاپ خودکار"],
         ["🔙 بازگشت"]
     ],
     resize_keyboard=True
 )
+
+backup_job = None  # برای مدیریت وضعیت بکاپ خودکار
+
 
 def is_admin(update: Update) -> bool:
     return update.effective_user.id in ADMIN_IDS
@@ -191,6 +197,340 @@ def save_user_data(data):
         logger.info("Users data saved successfully.")
     except Exception as e:
         logger.error(f"Error saving users data: {str(e)}")
+
+# --------------------------------------------------------------------------------
+# کنترل فایل های بکاپ گیری
+# --------------------------------------------------------------------------------
+
+BACKUP_DIR = "/opt/outline_bot/backup_restore/backup_file"
+MAX_BACKUPS = 5  # تعداد بکاپ‌های مجاز که نگه می‌داریم
+
+async def automated_backup(context: CallbackContext):
+    try:
+        logger.info("📤 شروع بکاپ‌گیری خودکار...")
+
+        # حذف بکاپ‌های قدیمی قبل از ایجاد بکاپ جدید
+        remove_old_backups()
+
+        # خواندن مقدار `BACKUP_CHANNEL_ID` از فایل تنظیمات
+        with open(CONFIG_PATH, "r") as file:
+            config_data = json.load(file)
+            backup_channel_id = config_data.get("BACKUP_CHANNEL_ID", None)
+
+        if not backup_channel_id:
+            logger.error("❌ `BACKUP_CHANNEL_ID` تنظیم نشده است! ارسال متوقف شد.")
+            return
+        
+        logger.info(f"📡 ارسال بکاپ به کانال: {backup_channel_id}")
+
+        # مسیر ذخیره‌سازی بکاپ
+        backup_path = "/opt/outline_bot/backup_restore/backup_file"
+        os.makedirs(backup_path, exist_ok=True)
+
+        files_to_backup = [
+            "/opt/outline_bot/users_data.json",
+            "/opt/outline/persisted-state/shadowbox_config.json",
+            "/opt/outline/persisted-state/outline-ss-server/config.yml"
+        ]
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        backup_file = os.path.join(backup_path, f"backup_{timestamp}.zip")
+
+        with zipfile.ZipFile(backup_file, "w") as zipf:
+            for file_path in files_to_backup:
+                if os.path.exists(file_path):
+                    zipf.write(file_path, os.path.basename(file_path))
+                    logger.info(f"✅ فایل {file_path} به بکاپ اضافه شد.")
+                else:
+                    logger.warning(f"⚠️ فایل {file_path} یافت نشد!")
+
+        logger.info(f"✅ بکاپ ایجاد شد: {backup_file}")
+
+        # ارسال بکاپ به کانال تلگرام
+        with open(backup_file, "rb") as f:
+            sent_message = await context.bot.send_document(
+                chat_id=backup_channel_id,
+                document=f,
+                filename=f"backup_{timestamp}.zip",
+                caption=f"📂 **بکاپ خودکار انجام شد!**\n📅 تاریخ: `{timestamp}`",
+                parse_mode="MarkdownV2"
+            )
+
+        logger.info(f"✅ بکاپ خودکار با موفقیت ارسال شد! پیام ID: {sent_message.message_id}")
+
+    except Exception as e:
+        logger.error(f"❌ خطا در ارسال بکاپ خودکار: {str(e)}")
+
+
+def remove_old_backups():
+    """
+    بررسی و حذف بکاپ‌های قدیمی، به‌گونه‌ای که همیشه فقط ۵ بکاپ آخر حفظ شوند.
+    """
+    try:
+        # دریافت لیست تمام بکاپ‌های موجود در مسیر
+        backup_files = sorted(
+            [f for f in os.listdir(BACKUP_DIR) if f.startswith("backup_") and f.endswith(".zip")],
+            key=lambda x: x  # مرتب‌سازی بر اساس نام فایل (تاریخ در نام وجود دارد)
+        )
+
+        # بررسی اینکه آیا تعداد بکاپ‌ها از حداکثر مجاز بیشتر شده است
+        if len(backup_files) > MAX_BACKUPS:
+            num_files_to_remove = len(backup_files) - MAX_BACKUPS  # تعداد فایل‌هایی که باید حذف شوند
+
+            for i in range(num_files_to_remove):
+                file_to_delete = os.path.join(BACKUP_DIR, backup_files[i])
+                os.remove(file_to_delete)  # حذف فایل
+                logger.info(f"🗑️ بکاپ قدیمی حذف شد: {file_to_delete}")
+
+    except Exception as e:
+        logger.error(f"❌ خطا در حذف بکاپ‌های قدیمی: {str(e)}")
+
+
+# --------------------------------------------------------------------------------
+# بکاپ گیری خودکار
+# --------------------------------------------------------------------------------
+
+async def show_backup_channel(update: Update, context: CallbackContext):
+    config_data = load_config()
+    backup_channel = config_data.get("BACKUP_CHANNEL", "ثبت نشده")
+    backup_channel_id = config_data.get("BACKUP_CHANNEL_ID", "ثبت نشده")
+
+    keyboard = [
+        [InlineKeyboardButton("✏️ ویرایش کانال و آیدی عددی", callback_data="edit_backup_channel")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_backup_menu")]
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        f"📡 **کانال بکاپ خودکار:**\n"
+        f"🔗 لینک کانال: {backup_channel}\n"
+        f"🔢 آیدی عددی: `{backup_channel_id}`",
+        parse_mode="Markdown",
+        reply_markup=reply_markup
+    )
+
+async def show_backup_channel(update: Update, context: CallbackContext):
+    # خواندن اطلاعات کانال از فایل کانفیگ
+    with open(CONFIG_PATH, "r") as file:
+        config_data = json.load(file)
+        backup_channel = config_data.get("BACKUP_CHANNEL", "تنظیم نشده است")
+        backup_channel_id = config_data.get("BACKUP_CHANNEL_ID", "تنظیم نشده است")
+
+    # ایجاد دکمه‌های اینلاین برای ویرایش و بازگشت
+    keyboard = [
+        [InlineKeyboardButton("✏️ ویرایش کانال و آیدی عددی", callback_data="edit_backup_channel")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_backup_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # ارسال پیام با دکمه‌های اینلاین
+    await update.message.reply_text(
+        f"📡 **کانال بکاپ خودکار:**\n"
+        f"🔗 لینک کانال: {backup_channel}\n"
+        f"🔢 آیدی عددی: `{backup_channel_id}`",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+
+
+
+
+async def edit_backup_channel(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    await query.message.reply_text(
+        "✏️ لطفاً لینک جدید کانال را ارسال کنید.\n"
+        "🔹 برای کانال **عمومی**: `@channelname`\n"
+        "🔹 برای کانال **خصوصی**: `https://t.me/+abcd1234xyz`\n\n"
+        "⏳ لطفاً لینک را ارسال کنید...",
+        parse_mode="Markdown"
+    )
+
+    return "GET_NEW_BACKUP_CHANNEL"
+
+
+async def get_new_backup_channel(update: Update, context: CallbackContext):
+    new_channel = update.message.text.strip()
+
+    # بررسی صحت لینک کانال
+    if not re.match(r"^(@[a-zA-Z0-9_]{5,32}|https://t.me/\+[a-zA-Z0-9_-]+)$", new_channel):
+        await update.message.reply_text(
+            "❌ **فرمت لینک نامعتبر است! لطفاً مجدداً تلاش کنید.**\n"
+            "🔹 **برای کانال عمومی:** `@channelname`\n"
+            "🔹 **برای کانال خصوصی:** `https://t.me/+abcd1234xyz`",
+            parse_mode="Markdown"
+        )
+        return "GET_NEW_BACKUP_CHANNEL"
+
+    context.user_data["new_backup_channel"] = new_channel
+
+    # اگر کانال خصوصی باشد، درخواست آیدی عددی کنیم
+    if new_channel.startswith("https://t.me/+"):
+        await update.message.reply_text(
+            "🔢 **لطفاً آیدی عددی کانال خصوصی خود را ارسال کنید.**\n"
+            "🔹 **مثال:** `-1001234567890`",
+            parse_mode="Markdown"
+        )
+        return "GET_NEW_BACKUP_CHANNEL_ID"
+
+    # اگر کانال عمومی است، مقدار `null` برای آیدی عددی در نظر گرفته شود
+    context.user_data["new_backup_channel_id"] = "null"
+
+    # ذخیره در فایل کانفیگ
+    await save_backup_channel(update, context)
+
+    return ConversationHandler.END
+
+async def get_new_backup_channel_id(update: Update, context: CallbackContext):
+    new_channel_id = update.message.text.strip()
+
+    # بررسی صحت فرمت آیدی عددی
+    if not re.match(r"^-100[0-9]{9,10}$", new_channel_id):
+        await update.message.reply_text(
+            "❌ **آیدی عددی نامعتبر است! لطفاً مجدداً وارد کنید.**\n"
+            "🔹 **مثال:** `-1001234567890`",
+            parse_mode="Markdown"
+        )
+        return "GET_NEW_BACKUP_CHANNEL_ID"
+
+    context.user_data["new_backup_channel_id"] = new_channel_id
+
+    # ذخیره در فایل کانفیگ
+    await save_backup_channel(update, context)
+
+    return ConversationHandler.END
+
+async def save_backup_channel(update: Update, context: CallbackContext):
+    new_channel = context.user_data.get("new_backup_channel", "ثبت نشده")
+    new_channel_id = context.user_data.get("new_backup_channel_id", "null")
+
+    if not new_channel:
+        await update.message.reply_text("❌ **خطا:** لینک کانال نامعتبر است!")
+        return
+
+    # خواندن فایل تنظیمات
+    config_data = load_config()
+
+    # بروزرسانی اطلاعات کانال
+    config_data["BACKUP_CHANNEL"] = new_channel
+    config_data["BACKUP_CHANNEL_ID"] = new_channel_id
+
+    # ذخیره در فایل تنظیمات
+    with open(CONFIG_PATH, "w") as file:
+        json.dump(config_data, file, indent=4)
+
+    logger.info(f"✅ کانال بکاپ تغییر کرد: {new_channel} | آیدی: {new_channel_id}")
+
+    # ارسال پیام تأیید تغییرات
+    await update.message.reply_text(
+        f"✅ **کانال بکاپ خودکار با موفقیت ثبت شد!**\n\n"
+        f"🔗 **لینک جدید:** {new_channel}\n"
+        f"🔢 **آیدی عددی:** `{new_channel_id}`\n\n"
+        f"♻️ **بکاپ بعدی به این کانال ارسال خواهد شد.**",
+        parse_mode="Markdown"
+    )
+
+    # اطمینان از اجرای `automated_backup` با مقادیر جدید
+    context.job_queue.run_once(automated_backup, when=10)
+
+
+
+async def back_to_backup_menu(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    # بازگشت به منوی بکاپ
+    await query.message.reply_text("🔙 بازگشت به منوی بکاپ:", reply_markup=BACKUP_MENU_KEYBOARD)
+
+
+
+
+def escape_markdown_v2(text):
+    """
+    این تابع تمامی کاراکترهای خاص MarkdownV2 را به درستی escape می‌کند.
+    """
+    escape_chars = r"_*[]()~`>#+-=|{}.!"
+    return "".join(f"\\{char}" if char in escape_chars else char for char in text)
+
+async def automated_backup(context: CallbackContext):
+    try:
+        logger.info("📤 شروع بکاپ‌گیری خودکار...")
+
+        # خواندن مقدار `BACKUP_CHANNEL_ID` از فایل تنظیمات **هر بار قبل از اجرا**
+        config_data = load_config()
+        backup_channel_id = config_data.get("BACKUP_CHANNEL_ID", None)
+
+        if not backup_channel_id:
+            logger.error("❌ `BACKUP_CHANNEL_ID` تنظیم نشده است! ارسال متوقف شد.")
+            return
+        
+        logger.info(f"📡 ارسال بکاپ به کانال: {backup_channel_id}")
+
+        # مسیر ذخیره‌سازی بکاپ
+        backup_path = "/opt/outline_bot/backup_restore/backup_file"
+        os.makedirs(backup_path, exist_ok=True)
+
+        files_to_backup = [
+            "/opt/outline_bot/users_data.json",
+            "/opt/outline/persisted-state/shadowbox_config.json",
+            "/opt/outline/persisted-state/outline-ss-server/config.yml"
+        ]
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        backup_file = os.path.join(backup_path, f"backup_{timestamp}.zip")
+
+        with zipfile.ZipFile(backup_file, "w") as zipf:
+            for file_path in files_to_backup:
+                if os.path.exists(file_path):
+                    zipf.write(file_path, os.path.basename(file_path))
+                    logger.info(f"✅ فایل {file_path} به بکاپ اضافه شد.")
+                else:
+                    logger.warning(f"⚠️ فایل {file_path} یافت نشد!")
+
+        logger.info(f"✅ بکاپ ایجاد شد: {backup_file}")
+
+        # ارسال بکاپ به کانال
+        with open(backup_file, "rb") as f:
+            sent_message = await context.bot.send_document(
+                chat_id=backup_channel_id,
+                document=f,
+                filename=f"backup_{timestamp}.zip",
+                caption=f"📂 **بکاپ خودکار انجام شد!**\n📅 تاریخ: `{timestamp}`",
+                parse_mode="Markdown"
+            )
+
+        logger.info(f"✅ بکاپ خودکار با موفقیت ارسال شد! پیام ID: {sent_message.message_id}")
+
+    except Exception as e:
+        logger.error(f"❌ خطا در ارسال بکاپ خودکار: {str(e)}")
+
+
+async def enable_auto_backup(update: Update, context: CallbackContext):
+    global backup_job
+    if backup_job:
+        await update.message.reply_text("✅ بکاپ خودکار **قبلاً فعال شده است!**")
+        return
+
+    await update.message.reply_text("✅ **بکاپ خودکار فعال شد!**\n🔄 اولین بکاپ هم‌اکنون ارسال می‌شود و از این پس **هر 12 ساعت** ارسال خواهد شد.")
+
+    # اولین بکاپ بلافاصله گرفته شود
+    await automated_backup(context)
+
+    # ثبت زمان‌بندی برای اجرای بکاپ هر 12 ساعت (43200 ثانیه)
+    backup_job = context.job_queue.run_repeating(automated_backup, interval=43200, first=10)
+
+
+async def disable_auto_backup(update: Update, context: CallbackContext):
+    global backup_job
+    if backup_job:
+        backup_job.schedule_removal()
+        backup_job = None
+        await update.message.reply_text("⛔ **بکاپ خودکار غیرفعال شد!**\nدیگر بکاپ‌گیری خودکار انجام نخواهد شد.")
+    else:
+        await update.message.reply_text("⚠️ بکاپ خودکار **قبلاً خاموش شده است.**")
+
 
 
 # --------------------------------------------------------------------------------
@@ -563,40 +903,51 @@ async def show_backup_menu(update, context):
 
 async def backup_files(update, context):
     logger.debug(f"Admin {update.effective_user.id} requested backup.")
+    
+    # مسیر ذخیره‌سازی بکاپ
     backup_path = "/opt/outline_bot/backup_restore/backup_file"
     os.makedirs(backup_path, exist_ok=True)
 
+    # فایل‌هایی که باید بکاپ گرفته شوند
     files_to_backup = [
         "/opt/outline_bot/users_data.json",
         "/opt/outline/persisted-state/shadowbox_config.json",
         "/opt/outline/persisted-state/outline-ss-server/config.yml"
     ]
 
+    # ساخت نام فایل بکاپ با تاریخ و زمان
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     backup_file = os.path.join(backup_path, f"backup_{timestamp}.zip")
 
     try:
+        # ایجاد فایل بکاپ (ZIP)
         with zipfile.ZipFile(backup_file, "w") as zipf:
             for file_path in files_to_backup:
                 if os.path.exists(file_path):
                     zipf.write(file_path, os.path.basename(file_path))
-                    backup_logger.info(f"File {file_path} added to backup.")
+                    backup_logger.info(f"📂 فایل {file_path} به بکاپ اضافه شد.")
                 else:
-                    backup_logger.warning(f"File {file_path} does not exist.")
+                    backup_logger.warning(f"⚠️ فایل {file_path} وجود ندارد و اضافه نشد.")
 
-        await update.message.reply_text("بکاپ با موفقیت ایجاد شد! فایل در حال ارسال است...")
-        backup_logger.info(f"Backup created successfully at {backup_file}")
+        await update.message.reply_text("✅ **بکاپ با موفقیت ایجاد شد!**\n📤 فایل در حال ارسال است...")
+        backup_logger.info(f"✅ بکاپ با موفقیت ذخیره شد: {backup_file}")
 
+        # ارسال فایل بکاپ به چت کاربر
         with open(backup_file, "rb") as f:
-            await context.bot.send_document(
+            sent_message = await context.bot.send_document(
                 chat_id=update.effective_chat.id,
                 document=f,
                 filename=f"backup_{timestamp}.zip",
-                caption="📂 فایل بکاپ ایجاد شده و ارسال می‌شود."
+                caption=f"📂 *بکاپ ایجاد شد!*\n🔄 این بکاپ شامل اطلاعات سرور و کاربران است.\n📅 تاریخ: `{timestamp}`",
+                parse_mode="MarkdownV2"
             )
+        
+        backup_logger.info(f"📤 بکاپ ارسال شد! پیام ID: {sent_message.message_id}")
+
     except Exception as e:
-        await update.message.reply_text("خطایی در ایجاد بکاپ رخ داد!")
-        backup_logger.error(f"Error creating backup: {str(e)}")
+        await update.message.reply_text("❌ **خطایی در ایجاد بکاپ رخ داد!**")
+        backup_logger.error(f"❌ خطا در ایجاد بکاپ: {str(e)}")
+
 
 async def restore_files(update, context):
     logger.debug(f"Admin {update.effective_user.id} requested restore files list.")
@@ -873,6 +1224,31 @@ def main():
     application.add_handler(MessageHandler(filters.Text(["📥 بکاپ"]), backup_files))
     application.add_handler(MessageHandler(filters.Text(["📤 ریستور"]), restore_files))
     application.add_handler(MessageHandler(filters.Text(["🔙 بازگشت"]), back_to_main))
+    application.add_handler(MessageHandler(filters.Regex("^📡 نمایش کانال بکاپ خودکار$"), show_backup_channel))
+    application.add_handler(CallbackQueryHandler(edit_backup_channel, pattern="edit_backup_channel"))
+    application.add_handler(CallbackQueryHandler(back_to_backup_menu, pattern="back_to_backup_menu"))
+    application.add_handler(MessageHandler(filters.Text(["📤 روشن‌کردن بکاپ خودکار"]), enable_auto_backup))
+    application.add_handler(MessageHandler(filters.Text(["⛔ خاموش‌کردن بکاپ خودکار"]), disable_auto_backup))
+
+
+    # هندلر تغییر کانال بکاپ
+    edit_backup_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(edit_backup_channel, pattern="edit_backup_channel")],
+        states={
+            "GET_NEW_BACKUP_CHANNEL": [MessageHandler(filters.TEXT & ~filters.COMMAND, get_new_backup_channel)],
+            "GET_NEW_BACKUP_CHANNEL_ID": [MessageHandler(filters.TEXT & ~filters.COMMAND, get_new_backup_channel_id)]
+        },
+        fallbacks=[CallbackQueryHandler(show_backup_channel, pattern="back_to_backup_menu")]
+    )
+    application.add_handler(edit_backup_conv)
+
+    application.add_handler(CallbackQueryHandler(show_backup_channel, pattern="back_to_backup_menu"))
+
+    # مقداردهی `JobQueue`
+    job_queue = application.job_queue
+    job_queue.run_repeating(automated_backup, interval=43200, first=10)
+
+
 
     # کال‌بک‌هندلر برای دکمه‌های ریستور
     application.add_handler(CallbackQueryHandler(handle_restore_callback))
