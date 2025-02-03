@@ -55,51 +55,37 @@ else
     exit 1
 fi
 
-# دریافت دامین از کاربر
-read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
+# پرسیدن دامین از کاربر
+read -p "آیا دامین دارید؟ (y/n): " HAS_DOMAIN
+if [[ "$HAS_DOMAIN" =~ ^[Yy](es|ES)?$ ]]; then
+    read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
 
-# نصب و تنظیم Cloudflare Tunnel
-echo "📢 در حال نصب Cloudflare Tunnel..."
-curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-chmod +x cloudflared
-sudo mv cloudflared /usr/local/bin/
-echo "✅ Cloudflare Tunnel نصب شد!"
+    # استخراج IP دامین (فقط IPv4)
+    DOMAIN_IP=$(ping -4 -c 1 "$DOMAIN_NAME" | grep -oP '(\d{1,3}\.){3}\d{1,3}' | head -n 1)
 
-# احراز هویت Cloudflare
-echo "🔗 لطفاً لینک زیر را در مرورگر خود باز کرده و احراز هویت Cloudflare را انجام دهید:"
-cloudflared tunnel login
+    # استخراج IP سرور (فقط IPv4)
+    SERVER_IP=$(curl -4 -s ifconfig.me)
 
-# ایجاد تونل جدید
-echo "🔧 در حال ایجاد تونل Cloudflare..."
-TUNNEL_NAME="vpn-tunnel"
-cloudflared tunnel create $TUNNEL_NAME
-
-TUNNEL_ID=$(cloudflared tunnel list | grep $TUNNEL_NAME | awk '{print $1}')
-echo "🔗 تونل با ID: $TUNNEL_ID ساخته شد."
-
-# تنظیم فایل پیکربندی تونل
-mkdir -p ~/.cloudflared
-cat <<EOF > ~/.cloudflared/config.yml
-tunnel: $TUNNEL_ID
-credentials-file: /root/.cloudflared/$TUNNEL_ID.json
-ingress:
-  - hostname: $DOMAIN_NAME
-    service: http://127.0.0.1:443
-  - service: http_status:404
-EOF
-
-# اتصال تونل به دامنه Cloudflare
-cloudflared tunnel route dns $TUNNEL_ID $DOMAIN_NAME
-cloudflared service install
-sudo systemctl start cloudflared
-sudo systemctl enable cloudflared
-
-# نمایش اطلاعات
-echo "✅ Cloudflare Tunnel برای دامنه $DOMAIN_NAME با موفقیت راه‌اندازی شد!"
+    # بررسی هماهنگی IP دامین با IP سرور
+    if [ "$DOMAIN_IP" == "$SERVER_IP" ]; then
+        echo "دامین با IP سرور هماهنگ است. ادامه می‌دهیم..."
+        API_URL="https://$DOMAIN_NAME"
+    else
+        echo "خطا: دامین وارد شده با IP سرور هماهنگ نیست. لطفاً بررسی کنید."
+        echo "دامین وارد شده: $DOMAIN_NAME"
+        echo "IP دامین: $DOMAIN_IP"
+        echo "IP سرور: $SERVER_IP"
+        exit 1
+    fi
+else
+    # اگر کاربر دامین نداشت، استفاده از IP سرور
+    SERVER_IP=$(curl -4 -s ifconfig.me)
+    API_URL="https://$SERVER_IP"
+fi
 
 # استخراج مقادیر certSha256 و apiUrl از فایل access.txt
 CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
-OUTLINE_API_URL="https://$DOMAIN_NAME:$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')"
+OUTLINE_API_URL="$API_URL:$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')"
 
 # بررسی استخراج موفقیت‌آمیز داده‌ها
 if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
@@ -122,7 +108,6 @@ cat <<EOF > $CONFIG_FILE
 }
 EOF
 chmod 600 $CONFIG_FILE
-
 
 # دریافت توکن تلگرام
 read -p "لطفاً توکن ربات تلگرام را وارد کنید: " BOT_TOKEN
@@ -148,39 +133,8 @@ else
     ADMIN_IDS_STR="[${ADMIN_IDS_STR}]"
 fi
 
-# دریافت لینک کانال برای بکاپ خودکار
-while true; do
-    read -p "لطفاً لینک کانال تلگرام خود را برای بکاپ خودکار وارد کنید (عمومی یا خصوصی): " BACKUP_CHANNEL
-    BACKUP_CHANNEL=$(echo "$BACKUP_CHANNEL" | tr -d ' ')
-
-    if [[ "$BACKUP_CHANNEL" =~ ^@([a-zA-Z0-9_]{5,32})$ ]]; then
-        echo "✅ کانال عمومی تایید شد: $BACKUP_CHANNEL"
-        BACKUP_CHANNEL_ID="null"
-        break
-    elif [[ "$BACKUP_CHANNEL" =~ ^https://t.me/\+[a-zA-Z0-9_-]+$ ]]; then
-        echo "✅ لینک کانال خصوصی تایید شد: $BACKUP_CHANNEL"
-        
-        while true; do
-            read -p "🔢 لطفاً آیدی عددی کانال خصوصی خود را وارد کنید (مانند -1001234567890): " BACKUP_CHANNEL_ID
-            
-            if [[ "$BACKUP_CHANNEL_ID" =~ ^-100[0-9]{9,10}$ ]]; then
-                echo "✅ آیدی عددی تایید شد: $BACKUP_CHANNEL_ID"
-                break
-            else
-                echo "❌ خطا: لطفاً آیدی عددی معتبر وارد کنید."
-            fi
-        done
-        break
-    else
-        echo "❌ خطا: فرمت لینک وارد شده صحیح نیست. لطفاً مجدداً تلاش کنید."
-    fi
-done
-
-# ذخیره اطلاعات در فایل تنظیمات
-CONFIG_FILE="/opt/outline_bot/.config.json"
-jq ". + { \"BOT_TOKEN\": \"$BOT_TOKEN\", \"ADMIN_IDS\": $ADMIN_IDS_STR, \"BACKUP_CHANNEL\": \"$BACKUP_CHANNEL\", \"BACKUP_CHANNEL_ID\": \"$BACKUP_CHANNEL_ID\" }" $CONFIG_FILE > tmp.$$.json && mv tmp.$$.json $CONFIG_FILE
-
-
+# ایجاد تنظیمات تلگرام در فایل پیکربندی
+jq ". + { \"BOT_TOKEN\": \"$BOT_TOKEN\", \"ADMIN_IDS\": $ADMIN_IDS_STR }" $CONFIG_FILE > tmp.$$.json && mv tmp.$$.json $CONFIG_FILE
 
 # ارسال پیام خوش‌آمدگویی به تلگرام
 echo -e "${CYAN}Sending welcome message to the user...${RESET}"
@@ -193,7 +147,7 @@ curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
 
 API URL from Outline Server:
 
-{"apiUrl":"$OUTLINE_API_URL","certSha256":"$CERT_SHA256"}
+{\"apiUrl\":\"$OUTLINE_API_URL\",\"certSha256\":\"$CERT_SHA256\"}
 
 🚀 لطفاً مقادیر بالا را در Outline Manager وارد کنید تا به سرور متصل شوید🚀
 
@@ -209,10 +163,6 @@ https://s3.amazonaws.com/outline-releases/manager/macos/stable/Outline-Manager.d
 📥لینک دانلود لینوکس📱:
 https://s3.amazonaws.com/outline-releases/manager/linux/stable/Outline-Manager.AppImage
 *******
-
-
-📂 لطفاً اطمینان حاصل کنید که ربات در این کانال به عنوان **ادمین** اضافه شده است تا بتواند بکاپ‌ها را ارسال کند.
-
 
 با تشکر از نصب شما! لطفاً حمایت ما را فراموش نکنید.
 آیدی پشتیبانی 24 ساعته ربات ما:
