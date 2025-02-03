@@ -133,8 +133,39 @@ else
     ADMIN_IDS_STR="[${ADMIN_IDS_STR}]"
 fi
 
-# ایجاد تنظیمات تلگرام در فایل پیکربندی
-jq ". + { \"BOT_TOKEN\": \"$BOT_TOKEN\", \"ADMIN_IDS\": $ADMIN_IDS_STR }" $CONFIG_FILE > tmp.$$.json && mv tmp.$$.json $CONFIG_FILE
+# دریافت لینک کانال برای بکاپ خودکار
+while true; do
+    read -p "لطفاً لینک کانال تلگرام خود را برای بکاپ خودکار وارد کنید (عمومی یا خصوصی): " BACKUP_CHANNEL
+    BACKUP_CHANNEL=$(echo "$BACKUP_CHANNEL" | tr -d ' ')
+
+    if [[ "$BACKUP_CHANNEL" =~ ^@([a-zA-Z0-9_]{5,32})$ ]]; then
+        echo "✅ کانال عمومی تایید شد: $BACKUP_CHANNEL"
+        BACKUP_CHANNEL_ID="null"
+        break
+    elif [[ "$BACKUP_CHANNEL" =~ ^https://t.me/\+[a-zA-Z0-9_-]+$ ]]; then
+        echo "✅ لینک کانال خصوصی تایید شد: $BACKUP_CHANNEL"
+        
+        while true; do
+            read -p "🔢 لطفاً آیدی عددی کانال خصوصی خود را وارد کنید (مانند -1001234567890): " BACKUP_CHANNEL_ID
+            
+            if [[ "$BACKUP_CHANNEL_ID" =~ ^-100[0-9]{9,10}$ ]]; then
+                echo "✅ آیدی عددی تایید شد: $BACKUP_CHANNEL_ID"
+                break
+            else
+                echo "❌ خطا: لطفاً آیدی عددی معتبر وارد کنید."
+            fi
+        done
+        break
+    else
+        echo "❌ خطا: فرمت لینک وارد شده صحیح نیست. لطفاً مجدداً تلاش کنید."
+    fi
+done
+
+# ذخیره اطلاعات در فایل تنظیمات
+CONFIG_FILE="/opt/outline_bot/.config.json"
+jq ". + { \"BOT_TOKEN\": \"$BOT_TOKEN\", \"ADMIN_IDS\": $ADMIN_IDS_STR, \"BACKUP_CHANNEL\": \"$BACKUP_CHANNEL\", \"BACKUP_CHANNEL_ID\": \"$BACKUP_CHANNEL_ID\" }" $CONFIG_FILE > tmp.$$.json && mv tmp.$$.json $CONFIG_FILE
+
+
 
 # ارسال پیام خوش‌آمدگویی به تلگرام
 echo -e "${CYAN}Sending welcome message to the user...${RESET}"
@@ -147,7 +178,7 @@ curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
 
 API URL from Outline Server:
 
-{\"apiUrl\":\"$OUTLINE_API_URL\",\"certSha256\":\"$CERT_SHA256\"}
+{"apiUrl":"$OUTLINE_API_URL","certSha256":"$CERT_SHA256"}
 
 🚀 لطفاً مقادیر بالا را در Outline Manager وارد کنید تا به سرور متصل شوید🚀
 
@@ -163,6 +194,10 @@ https://s3.amazonaws.com/outline-releases/manager/macos/stable/Outline-Manager.d
 📥لینک دانلود لینوکس📱:
 https://s3.amazonaws.com/outline-releases/manager/linux/stable/Outline-Manager.AppImage
 *******
+
+
+📂 لطفاً اطمینان حاصل کنید که ربات در این کانال به عنوان **ادمین** اضافه شده است تا بتواند بکاپ‌ها را ارسال کند.
+
 
 با تشکر از نصب شما! لطفاً حمایت ما را فراموش نکنید.
 آیدی پشتیبانی 24 ساعته ربات ما:
