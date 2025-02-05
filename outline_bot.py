@@ -453,10 +453,17 @@ async def back_to_backup_menu(update: Update, context: CallbackContext):
 
 def escape_markdown_v2(text: str) -> str:
     """
-    Escape all special MarkdownV2 characters.
+    Escape تمام کاراکترهای خاص در MarkdownV2 برای جلوگیری از خطاهای قالب‌بندی.
     """
-    escape_chars = r'_*[]()~`>#+-=|{}.!'
-    return ''.join(f'\\{char}' if char in escape_chars else char for char in text)
+    if text is None:
+        return "نامشخص"  # مقدار پیش‌فرض در صورت None بودن
+
+    escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    escaped_text = str(text)  # تبدیل به رشته در صورت عدد بودن مقدار
+    for char in escape_chars:
+        escaped_text = escaped_text.replace(char, f'\\{char}')
+    return escaped_text
+
 
 
 
@@ -1030,67 +1037,71 @@ async def list_users(update: Update, context: CallbackContext):
 
     logger.debug(f"Admin {update.effective_user.id} requested user list.")
     user_data = load_user_data()["users"]
+    
+    if user_data:
+        messages = []
+        chunk = f"👥 **کاربران موجود:**\n\n"
+        today = datetime.now().date()
 
-    if not user_data:
-        await update.message.reply_text("هیچ کاربری یافت نشد.")
-        return
+        for user_id, details in user_data.items():
+            if not isinstance(details, dict) or "expiry_date" not in details:
+                logger.warning(f"Invalid data for user ID {user_id}: {details}")
+                continue
 
-    messages = []
-    chunk = "👥 **کاربران موجود:**\n\n"
-    today = datetime.now().date()
+            expiry_dt = parse_date(details["expiry_date"])
+            expiry_date_only = expiry_dt.date()
+            status = "✅ فعال" if expiry_date_only >= today else "❌ منقضی‌شده"
+            data_limit = details.get("data_limit_gb", "نامحدود")
+            data_used = details.get("data_used_gb", 0)
 
-    for user_id, details in user_data.items():
-        if not isinstance(details, dict) or "expiry_date" not in details:
-            logger.warning(f"Invalid data for user ID {user_id}: {details}")
-            continue
+            # گرفتن اطلاعات تماس و بررسی فرمت آن
+            contact_info = details.get("contact_info", "ندارد")
+            if contact_info.startswith("@"):
+                contact_display = f"📧 آیدی تلگرام: `{escape_markdown_v2(contact_info)}`"
+            elif contact_info.isdigit():
+                contact_display = f"📞 شماره تماس: `{escape_markdown_v2(contact_info)}`"
+            else:
+                contact_display = "📞 اطلاعات تماس: `ندارد`"
 
-        # پردازش و escape تمام فیلدها
-        name = escape_markdown_v2(details.get('name', 'نامشخص'))
-        user_id_escaped = escape_markdown_v2(str(user_id))
-        expiry_date = escape_markdown_v2(details['expiry_date'])
-        
-        # اصلاح بخش contact_info برای جلوگیری از None
-        contact_info = details.get('contact_info')
-        if contact_info is None:  # اگر مقدار None بود
-            contact_info = 'ندارد'  # جایگزین با مقدار پیشفرض
-        else:
-            contact_info = str(contact_info)  # تبدیل به رشته برای اطمینان
-        contact_info = escape_markdown_v2(contact_info)
-        
-        data_limit = escape_markdown_v2(str(details.get('data_limit_gb', 'نامحدود')))
-        data_used = escape_markdown_v2(str(details.get('data_used_gb', 0)))
+            # Escape همه اطلاعات برای جلوگیری از خطای MarkdownV2
+            escaped_user_id = escape_markdown_v2(str(user_id))
+            escaped_name = escape_markdown_v2(details.get('name', 'نامشخص'))
+            escaped_expiry_date = escape_markdown_v2(details['expiry_date'])
+            escaped_status = escape_markdown_v2(status)
+            escaped_data_limit = escape_markdown_v2(str(data_limit))
+            escaped_data_used = escape_markdown_v2(str(data_used))
 
-        # بررسی وضعیت
-        expiry_dt = parse_date(details["expiry_date"])
-        status = "✅ فعال" if expiry_dt.date() >= today else "❌ منقضی‌شده"
+            # فرمت‌بندی اطلاعات کاربر
+            user_info = (
+                f"👤 **نام:** {escaped_name}\n"
+                f"🆔 **ID:** `{escaped_user_id}`\n"
+                f"📅 **تاریخ انقضا:** `{escaped_expiry_date}` \\({escaped_status}\\)\n"
+                f"{contact_display}\n"
+                f"📊 **حجم کل:** `{escaped_data_limit} GB`\n"
+                f"📉 **حجم مصرف‌شده:** `{escaped_data_used} GB`\n"
+                f"────────────────\n"
+            )
 
-        # فرمت‌بندی اطلاعات تماس
-        if contact_info.startswith("@"):
-            contact_display = f"📧 آیدی تلگرام: `{contact_info}`"
-        else:
-            contact_display = f"📞 شماره تماس: `{contact_info}`"
+            # بررسی محدودیت تلگرام (4096 کاراکتر) و تقسیم پیام در چند بخش
+            if len(chunk) + len(user_info) > 4000:
+                messages.append(chunk)
+                chunk = ""
 
-        user_info = (
-            f"👤 **نام:** {name}\n"
-            f"🆔 **ID:** `{user_id_escaped}`\n"
-            f"📅 **تاریخ انقضا:** `{expiry_date}` ({status})\n"
-            f"{contact_display}\n"
-            f"📊 **حجم کل:** `{data_limit} GB`\n"
-            f"📉 **حجم مصرف‌شده:** `{data_used} GB`\n"
-            "────────────────\n"
-        )
+            chunk += user_info
 
-        if len(chunk) + len(user_info) > 4000:
+        if chunk:
             messages.append(chunk)
-            chunk = ""
 
-        chunk += user_info
+        # ارسال هر بخش از پیام‌ها
+        for msg in messages:
+            try:
+                await update.message.reply_text(msg, parse_mode="MarkdownV2")
+            except telegram.error.BadRequest as e:
+                logger.error(f"Error sending message: {e}")
+                await update.message.reply_text("⚠️ خطا در نمایش اطلاعات. لطفاً با پشتیبانی تماس بگیرید.")
+    else:
+        await update.message.reply_text("هیچ کاربری یافت نشد.")
 
-    if chunk:
-        messages.append(chunk)
-
-    for msg in messages:
-        await update.message.reply_text(msg, parse_mode="MarkdownV2")
 # --------------------------------------------------------------------------------
 # حذف کاربر
 # --------------------------------------------------------------------------------
