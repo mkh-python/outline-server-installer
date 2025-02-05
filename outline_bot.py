@@ -145,8 +145,9 @@ backup_logger.addHandler(console_handler)
 GET_USER_NAME = 1
 GET_SUBSCRIPTION_DURATION = 11
 GET_DATA_LIMIT = 3
-GET_USER_ID = 4  # برای حذف
+GET_USER_ID = 4  
 RENEW_SUBSCRIPTION = 10
+GET_CONTACT_INFO = 5 
 
 
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
@@ -450,12 +451,15 @@ async def back_to_backup_menu(update: Update, context: CallbackContext):
 
 
 
-def escape_markdown_v2(text):
+def escape_markdown_v2(text: str) -> str:
     """
-    این تابع تمامی کاراکترهای خاص MarkdownV2 را به درستی escape می‌کند.
+    Escape all special MarkdownV2 characters.
     """
-    escape_chars = r"_*[]()~`>#+-=|{}.!"
-    return "".join(f"\\{char}" if char in escape_chars else char for char in text)
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    return ''.join(f'\\{char}' if char in escape_chars else char for char in text)
+
+
+
 
 async def automated_backup(context: CallbackContext):
     try:
@@ -810,13 +814,46 @@ GET_SUBSCRIPTION_DURATION = 2
 GET_DATA_LIMIT = 3
 
 async def ask_for_user_name(update: Update, context: CallbackContext):
+    """ درخواست نام کاربر جدید از مدیر """
     if not is_admin(update):
-        await update.message.reply_text("شما مجاز به استفاده از این ربات نیستید.")
+        await update.message.reply_text("❌ شما مجاز به استفاده از این ربات نیستید.")
         return ConversationHandler.END
 
-    logger.debug(f"Admin {update.effective_user.id} pressed 'Create user'. Asking for user name.")
-    await update.message.reply_text("لطفاً نام کاربر جدید را وارد کنید:")
-    return GET_USER_NAME
+    await update.message.reply_text("✏ لطفاً نام کاربر جدید را وارد کنید:")
+    return GET_USER_NAME  # انتظار دریافت نام از کاربر
+
+async def validate_user_name(update: Update, context: CallbackContext):
+    """ بررسی نام کاربر و رفتن به مرحله بعد """
+    user_real_name = update.message.text.strip()
+
+    if not user_real_name or user_real_name in ["🆕 ایجاد کاربر", ""]:
+        await update.message.reply_text("⚠ لطفاً یک نام معتبر برای کاربر وارد کنید:")
+        return GET_USER_NAME  
+
+    context.user_data["user_real_name"] = user_real_name  # ذخیره نام واقعی
+    logger.debug(f"✅ Admin {update.effective_user.id} entered name: {user_real_name}")
+
+    keyboard = [["✅ بله", "❌ خیر"]]
+
+    await update.message.reply_text(
+        "آیا کاربر آیدی تلگرام یا شماره تماس دارد؟\n"
+        "✅ بله - از شما درخواست اطلاعات خواهد شد.\n"
+        "❌ خیر - بدون اطلاعات تماس ادامه می‌دهیم.",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
+    return GET_CONTACT_INFO
+
+async def send_large_message(update: Update, text, parse_mode="MarkdownV2"):
+    """
+    این تابع پیام‌های طولانی‌تر از 4096 کاراکتر را به چند بخش تقسیم و ارسال می‌کند.
+    """
+    chunk_size = 4000  # محدودیت تلگرام برای پیام‌های طولانی
+    for i in range(0, len(text), chunk_size):
+        await update.message.reply_text(text[i:i+chunk_size], parse_mode=parse_mode)
+
+
+
+
 
 async def ask_for_subscription_duration(update: Update, context: CallbackContext):
     user_name = update.message.text.strip()
@@ -859,55 +896,110 @@ async def ask_for_data_limit(update: Update, context: CallbackContext):
     return GET_DATA_LIMIT
 
 async def finalize_create_user(update: Update, context: CallbackContext):
+    """ ایجاد کاربر در سرور و ذخیره اطلاعات """
     data_limit_str = update.message.text.strip()
+    
     if data_limit_str == "بازگشت":
-        await update.message.reply_text("عملیات لغو شد. به منوی اصلی بازگشتید.", reply_markup=MAIN_KEYBOARD)
+        await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=MAIN_KEYBOARD)
         logger.debug("User cancelled the operation in data limit step.")
         return ConversationHandler.END
 
     if not data_limit_str.isdigit() or int(data_limit_str) <= 0:
-        await update.message.reply_text("لطفاً یک عدد مثبت وارد کنید.")
+        await update.message.reply_text("⚠ لطفاً یک عدد معتبر وارد کنید.")
         logger.debug(f"Invalid data limit input: {data_limit_str}")
         return GET_DATA_LIMIT
 
     data_limit_gb = int(data_limit_str)
-    user_name = context.user_data["user_name"]
+
+    # مقداردهی درست نام کاربر
+    user_real_name = context.user_data.get("user_real_name", "نامشخص")  # مقدار واقعی که وارد شده است
+    contact_info = context.user_data.get("contact_info", "ندارد")  # اطلاعات تماس
+
+    # بررسی اینکه اطلاعات تماس آیدی تلگرام است یا شماره موبایل
+    if contact_info.startswith("@"):
+        contact_display = f"📧 آیدی تلگرام: {contact_info}"
+    else:
+        contact_display = f"📞 شماره تماس: {contact_info}"
+
     months = context.user_data["subscription_months"]
     expiry_date = datetime.now() + timedelta(days=30 * months)
 
-    logger.debug(f"Creating Outline user with name={user_name}, limit={data_limit_gb} GB, months={months}")
+    logger.debug(f"✅ Creating Outline user: name={user_real_name}, limit={data_limit_gb}GB, months={months}")
 
-    user_id, access_url = create_outline_user(user_name, data_limit_gb)
+    user_id, access_url = create_outline_user(user_real_name, data_limit_gb)
     if not user_id:
-        await update.message.reply_text("خطا در ایجاد کاربر جدید!")
+        await update.message.reply_text("❌ خطا در ایجاد کاربر جدید!")
         logger.error("Failed to create user.")
         return ConversationHandler.END
 
-    # ذخیره در فایل
+    # ذخیره در فایل JSON
     all_data = load_user_data()
     all_data["users"][str(user_id)] = {
-        "name": user_name,
+        "name": user_real_name,  # مقدار واقعی نام ذخیره می‌شود
         "expiry_date": expiry_date.strftime("%Y-%m-%d %H:%M:%S"),
         "accessUrl": access_url,
         "data_limit_gb": data_limit_gb,
+        "contact_info": contact_info,  # اطلاعات تماس ثبت می‌شود
     }
     save_user_data(all_data)
 
     message = (
-        f"کاربر جدید ایجاد شد! 🎉\n\n"
-        f"نام: {user_name}\n"
-        f"تاریخ انقضا: {expiry_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"حجم مصرفی مجاز: {data_limit_gb} گیگ\n\n"
-        f"لینک اتصال:\n{access_url}\n\n"
-        f"لینک دانلود برنامه‌های Outline:\n"
-        f"[iOS](https://apps.apple.com/us/app/outline-app/id1356177741)\n"
-        f"[Android](https://play.google.com/store/apps/details?id=org.outline.android.client&hl=en)\n"
-        f"[Windows](https://s3.amazonaws.com/outline-releases/client/windows/stable/Outline-Client.exe)\n"
-        f"[Mac](https://apps.apple.com/us/app/outline-secure-internet-access/id1356178125?mt=12)"
+        f"✅ **کاربر جدید ایجاد شد!** 🎉\n\n"
+        f"👤 **نام:** {user_real_name}\n"
+        f"{contact_display}\n"
+        f"📅 **تاریخ انقضا:** {expiry_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"🔋 **حجم مصرفی مجاز:** {data_limit_gb} GB\n\n"
+        f"🌐 **لینک اتصال:**\n{access_url}"
     )
     await update.message.reply_text(message, parse_mode="Markdown", reply_markup=MAIN_KEYBOARD)
 
     return ConversationHandler.END
+
+
+
+async def ask_for_contact_info(update: Update, context: CallbackContext):
+    """ پرسیدن اینکه آیا کاربر آیدی تلگرام یا شماره تماس دارد؟ """
+    user_name = update.message.text.strip()
+    context.user_data["user_name"] = user_name  # ذخیره نام کاربر
+
+    keyboard = [
+        ["✅ بله", "❌ خیر"]
+    ]
+
+    await update.message.reply_text(
+        "آیا کاربر آیدی تلگرام یا شماره تماس دارد؟\n"
+        "✅ بله - از شما درخواست اطلاعات خواهد شد.\n"
+        "❌ خیر - بدون اطلاعات تماس ادامه می‌دهیم.",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
+    return GET_CONTACT_INFO  # حرکت به مرحله دریافت اطلاعات تماس
+
+
+async def get_contact_info(update: Update, context: CallbackContext):
+    """ بعد از انتخاب 'بله'، اطلاعات تماس را درخواست می‌کند. """
+    answer = update.message.text.strip()
+
+    if answer == "✅ بله":
+        await update.message.reply_text("📞 لطفاً آیدی تلگرام یا شماره تماس کاربر را وارد کنید:")
+        return "SAVE_CONTACT_INFO"  # صبر برای دریافت اطلاعات تماس
+    else:
+        context.user_data["contact_info"] = "ندارد"  # مقدار پیش‌فرض ذخیره شود
+        return await ask_for_subscription_duration(update, context)
+
+
+async def save_contact_info(update: Update, context: CallbackContext):
+    contact_info = update.message.text.strip()
+    
+    if contact_info.startswith("@") or contact_info.isdigit():
+        context.user_data["contact_info"] = contact_info  # ذخیره اطلاعات در context
+    else:
+        context.user_data["contact_info"] = "ندارد"  # مقدار پیش‌فرض
+
+    await update.message.reply_text("✅ اطلاعات تماس ذخیره شد.")
+    return await ask_for_subscription_duration(update, context)
+
+
+
 
 
 # --------------------------------------------------------------------------------
@@ -919,6 +1011,18 @@ def parse_date(date_str):
     except ValueError:
         return datetime.strptime(date_str, "%Y-%m-%d")
 
+def escape_markdown(text):
+    """
+    این تابع تمامی کاراکترهای خاص MarkdownV2 را به درستی escape می‌کند.
+    """
+    if text is None:
+        return "نامشخص"  # مقدار پیش‌فرض
+    escape_chars = r"_*[]()~`>#+-=|{}.!<>"
+    return "".join(f"\\{char}" if char in escape_chars else char for char in text)
+
+
+
+
 async def list_users(update: Update, context: CallbackContext):
     if not is_admin(update):
         await update.message.reply_text("❌ شما مجاز به استفاده از این ربات نیستید.")
@@ -926,45 +1030,67 @@ async def list_users(update: Update, context: CallbackContext):
 
     logger.debug(f"Admin {update.effective_user.id} requested user list.")
     user_data = load_user_data()["users"]
-    if user_data:
-        messages = []
-        chunk = "👥 کاربران موجود:\n\n"
-        today = datetime.now().date()
 
-        for user_id, details in user_data.items():
-            if not isinstance(details, dict) or "expiry_date" not in details:
-                logger.warning(f"Invalid data for user ID {user_id}: {details}")
-                continue
-
-            expiry_dt = parse_date(details["expiry_date"])
-            expiry_date_only = expiry_dt.date()
-            status = "✅ فعال" if expiry_date_only >= today else "❌ منقضی‌شده"
-            data_limit = details.get("data_limit_gb", "نامحدود")
-            data_used = details.get("data_used_gb", 0)
-
-            user_info = (
-                f"ID: {user_id}\n"
-                f"Name: {details['name']}\n"
-                f"تاریخ انقضا: {details['expiry_date']} ({status})\n"
-                f"📊 حجم کل: {data_limit} GB\n"
-                f"📉 حجم مصرف‌شده: {data_used} GB\n\n"
-            )
-
-            if len(chunk) + len(user_info) > 4000:
-                messages.append(chunk)
-                chunk = ""
-
-            chunk += user_info
-
-        if chunk:
-            messages.append(chunk)
-
-        for msg in messages:
-            await update.message.reply_text(msg)
-    else:
+    if not user_data:
         await update.message.reply_text("هیچ کاربری یافت نشد.")
+        return
 
+    messages = []
+    chunk = "👥 **کاربران موجود:**\n\n"
+    today = datetime.now().date()
 
+    for user_id, details in user_data.items():
+        if not isinstance(details, dict) or "expiry_date" not in details:
+            logger.warning(f"Invalid data for user ID {user_id}: {details}")
+            continue
+
+        # پردازش و escape تمام فیلدها
+        name = escape_markdown_v2(details.get('name', 'نامشخص'))
+        user_id_escaped = escape_markdown_v2(str(user_id))
+        expiry_date = escape_markdown_v2(details['expiry_date'])
+        
+        # اصلاح بخش contact_info برای جلوگیری از None
+        contact_info = details.get('contact_info')
+        if contact_info is None:  # اگر مقدار None بود
+            contact_info = 'ندارد'  # جایگزین با مقدار پیشفرض
+        else:
+            contact_info = str(contact_info)  # تبدیل به رشته برای اطمینان
+        contact_info = escape_markdown_v2(contact_info)
+        
+        data_limit = escape_markdown_v2(str(details.get('data_limit_gb', 'نامحدود')))
+        data_used = escape_markdown_v2(str(details.get('data_used_gb', 0)))
+
+        # بررسی وضعیت
+        expiry_dt = parse_date(details["expiry_date"])
+        status = "✅ فعال" if expiry_dt.date() >= today else "❌ منقضی‌شده"
+
+        # فرمت‌بندی اطلاعات تماس
+        if contact_info.startswith("@"):
+            contact_display = f"📧 آیدی تلگرام: `{contact_info}`"
+        else:
+            contact_display = f"📞 شماره تماس: `{contact_info}`"
+
+        user_info = (
+            f"👤 **نام:** {name}\n"
+            f"🆔 **ID:** `{user_id_escaped}`\n"
+            f"📅 **تاریخ انقضا:** `{expiry_date}` ({status})\n"
+            f"{contact_display}\n"
+            f"📊 **حجم کل:** `{data_limit} GB`\n"
+            f"📉 **حجم مصرف‌شده:** `{data_used} GB`\n"
+            "────────────────\n"
+        )
+
+        if len(chunk) + len(user_info) > 4000:
+            messages.append(chunk)
+            chunk = ""
+
+        chunk += user_info
+
+    if chunk:
+        messages.append(chunk)
+
+    for msg in messages:
+        await update.message.reply_text(msg, parse_mode="MarkdownV2")
 # --------------------------------------------------------------------------------
 # حذف کاربر
 # --------------------------------------------------------------------------------
@@ -1440,12 +1566,18 @@ def main():
     create_user_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🆕 ایجاد کاربر$"), ask_for_user_name)],
         states={
-            GET_USER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_for_subscription_duration)],
+            GET_USER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, validate_user_name)],  # اعتبارسنجی نام
+            GET_CONTACT_INFO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_contact_info)],  
+            "SAVE_CONTACT_INFO": [MessageHandler(filters.TEXT & ~filters.COMMAND, save_contact_info)],  
             GET_SUBSCRIPTION_DURATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_for_data_limit)],
             GET_DATA_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_create_user)],
         },
         fallbacks=[],
     )
+
+
+
+
 
     # ساخت ConversationHandler برای حذف کاربر
     delete_user_handler = ConversationHandler(
