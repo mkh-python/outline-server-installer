@@ -14,8 +14,8 @@ import urllib3
 from threading import Timer
 import json
 from pytz import timezone
-from datetime import datetime, timedelta
-from telegram import Update, ReplyKeyboardMarkup
+from datetime import datetime, timedelta, time
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -143,19 +143,24 @@ backup_logger.addHandler(console_handler)
 # ثابت‌ها و مقادیر گفتگو
 # --------------------------------------------------------------------------------
 GET_USER_NAME = 1
-GET_SUBSCRIPTION_DURATION = 2
+GET_SUBSCRIPTION_DURATION = 11
 GET_DATA_LIMIT = 3
 GET_USER_ID = 4  # برای حذف
+RENEW_SUBSCRIPTION = 10
+
 
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
         ["🆕 ایجاد کاربر", "👥 مشاهده کاربران"],
         ["❌ حذف کاربر", "💬 درخواست پشتیبانی"],
         ["🔄 دریافت آخرین آپدیت", "🎯 دریافت اکانت تست"],
-        ["📂 پشتیبان‌گیری"]
+        ["📂 پشتیبان‌گیری", "🔄 تمدید اشتراک"],
+        ["📊 آمار مصرف"]  # اضافه کردن دکمه جدید
     ],
     resize_keyboard=True,
 )
+
+
 
 BACKUP_MENU_KEYBOARD = ReplyKeyboardMarkup(
     [
@@ -332,8 +337,6 @@ async def show_backup_channel(update: Update, context: CallbackContext):
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
-
-
 
 
 async def edit_backup_channel(update: Update, context: CallbackContext):
@@ -534,6 +537,77 @@ async def disable_auto_backup(update: Update, context: CallbackContext):
 
 
 # --------------------------------------------------------------------------------
+# پنل آماری مصرف پهنای باند کاربران
+# --------------------------------------------------------------------------------
+async def get_bandwidth_usage():
+    """
+    دریافت مصرف پهنای باند کاربران از Outline API
+    """
+    try:
+        # مسیر صحیح را تست کن
+        metrics_url = f"{OUTLINE_API_URL}/server/metrics"
+
+        response = requests.get(
+            metrics_url,
+            headers={"Authorization": f"Bearer {OUTLINE_API_KEY}"},
+            verify=False,
+        )
+
+        if response.status_code != 200:
+            logger.error(f"❌ خطا در دریافت مصرف پهنای باند: {response.status_code} - {response.text}")
+            return None
+
+        return response.json()
+    except Exception as e:
+        logger.error(f"❌ خطای غیرمنتظره در دریافت مصرف پهنای باند: {str(e)}")
+        return None
+
+
+async def show_bandwidth_stats(update: Update, context: CallbackContext):
+    """
+    نمایش آمار مصرف پهنای باند کاربران
+    """
+    user_data = load_user_data()
+    metrics = await get_bandwidth_usage()
+
+    if not metrics or "bytesTransferredByUserId" not in metrics["metrics"]:
+        await update.message.reply_text("❌ خطا در دریافت اطلاعات مصرف پهنای باند.")
+        return
+
+    stats = []
+    
+    for user_id, details in user_data["users"].items():
+        try:
+            # دریافت حجم مصرف‌شده از API
+            used_bytes = metrics["metrics"]["bytesTransferredByUserId"].get(user_id, 0)
+            used_gb = round(used_bytes / (1024**3), 2)  # تبدیل به گیگابایت
+            allowed_gb = details.get("data_limit_gb", "نامحدود")
+            
+            # محاسبه درصد مصرف‌شده
+            percent_used = (used_gb / allowed_gb) * 100 if isinstance(allowed_gb, int) else "∞"
+
+            stats.append(
+                f"👤 **{details['name']}**\n"
+                f"📤 مصرف شده: `{used_gb}` GB\n"
+                f"📊 درصد مصرف: `{percent_used}%`\n"
+                f"🔋 سقف مجاز: `{allowed_gb} GB`\n"
+                "────────────────"
+            )
+
+        except Exception as e:
+            logger.error(f"خطا در پردازش اطلاعات {user_id}: {str(e)}")
+
+    if stats:
+        await update.message.reply_text(
+            "📊 **آمار مصرف پهنای باند کاربران:**\n\n" + "\n".join(stats),
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text("⚠️ اطلاعات آماری یافت نشد.")
+
+
+
+# --------------------------------------------------------------------------------
 # تابع کمکی ایجاد کاربر Outline
 # --------------------------------------------------------------------------------
 def create_outline_user(name: str, data_limit_gb: int) -> (str, str):
@@ -582,6 +656,110 @@ def create_outline_user(name: str, data_limit_gb: int) -> (str, str):
     except Exception as e:
         logger.error(f"Exception in create_outline_user: {str(e)}")
         return None, None
+
+
+# --------------------------------------------------------------------------------
+# تمدید اشتراک
+# --------------------------------------------------------------------------------
+async def start_renew_subscription(update: Update, context: CallbackContext):
+    if not is_admin(update):
+        await update.message.reply_text("❌ شما مجاز به استفاده از این بخش نیستید.")
+        return ConversationHandler.END
+
+    logger.debug(f"✅ کاربر {update.effective_user.id} وارد بخش تمدید اشتراک شد.")
+
+    await update.message.reply_text(
+        "📌 لطفاً **شناسه کاربری (ID)** کاربری که می‌خواهید تمدید کنید را ارسال کنید:",
+        reply_markup=ReplyKeyboardMarkup([["🔙 بازگشت"]], resize_keyboard=True),
+    )
+
+    return RENEW_SUBSCRIPTION
+
+
+async def process_renew_subscription(update: Update, context: CallbackContext):
+    user_id = update.message.text.strip()
+
+    if user_id == "🔙 بازگشت":
+        await update.message.reply_text("🚫 عملیات تمدید اشتراک لغو شد.", reply_markup=MAIN_KEYBOARD)
+        return ConversationHandler.END
+
+    user_data = load_user_data()
+
+    if user_id not in user_data["users"]:
+        await update.message.reply_text("❌ کاربر یافت نشد! لطفاً شناسه صحیح را ارسال کنید.")
+        return RENEW_SUBSCRIPTION  # دوباره درخواست شناسه
+
+    context.user_data["renew_user_id"] = user_id
+
+    logger.debug(f"✅ شناسه کاربر {user_id} برای تمدید دریافت شد.")
+
+    keyboard = [
+        ["1 ماه (30 روز)", "2 ماه (60 روز)"],
+        ["3 ماه (90 روز)", "6 ماه (180 روز)"],
+        ["🔙 بازگشت"]  # اضافه کردن دکمه "بازگشت"
+    ]
+
+    await update.message.reply_text(
+        "📆 لطفاً **مدت زمان تمدید** را انتخاب کنید:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
+
+    return GET_SUBSCRIPTION_DURATION
+
+async def finalize_renew_subscription(update: Update, context: CallbackContext):
+    duration_text = update.message.text.strip()
+
+    if duration_text == "🔙 بازگشت":
+        await update.message.reply_text("🚫 عملیات تمدید اشتراک لغو شد.", reply_markup=MAIN_KEYBOARD)
+        return ConversationHandler.END
+
+    duration_map = {
+        "1 ماه (30 روز)": 30,
+        "2 ماه (60 روز)": 60,
+        "3 ماه (90 روز)": 90,
+        "6 ماه (180 روز)": 180
+    }
+
+    if duration_text not in duration_map:
+        await update.message.reply_text("⚠ گزینه نامعتبر است. لطفاً یکی از گزینه‌های موجود را انتخاب کنید.")
+        return GET_SUBSCRIPTION_DURATION
+
+    days = duration_map[duration_text]
+    user_id = context.user_data["renew_user_id"]
+    user_data = load_user_data()
+
+    try:
+        current_expiry = parse_date(user_data["users"][user_id]["expiry_date"])
+        new_expiry = current_expiry + timedelta(days=days)
+
+        user_data["users"][user_id]["expiry_date"] = new_expiry.strftime("%Y-%m-%d")
+
+        if "renew_history" not in user_data["users"][user_id]:
+            user_data["users"][user_id]["renew_history"] = []
+
+        user_data["users"][user_id]["renew_history"].append({
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "days_added": days,
+            "admin": update.effective_user.id
+        })
+
+        save_user_data(user_data)
+
+        await update.message.reply_text(
+            f"✅ اشتراک کاربر `{user_data['users'][user_id]['name']}` تمدید شد!\n"
+            f"📅 **تاریخ انقضای جدید:** `{new_expiry.strftime('%Y-%m-%d')}`",
+            reply_markup=MAIN_KEYBOARD
+        )
+
+        logger.info(f"✅ اشتراک کاربر {user_id} تمدید شد تا {new_expiry.strftime('%Y-%m-%d')}.")
+
+    except KeyError:
+        await update.message.reply_text("❌ خطا: کاربر یافت نشد!")
+    except ValueError as e:
+        await update.message.reply_text(f"❌ خطا در پردازش تاریخ: {str(e)}")
+
+    return ConversationHandler.END
+
 
 
 # --------------------------------------------------------------------------------
@@ -836,6 +1014,67 @@ async def confirm_delete_user(update: Update, context: CallbackContext):
         await update.message.reply_text("خطای غیرمنتظره در حذف کاربر!")
 
     return ConversationHandler.END
+
+
+# --------------------------------------------------------------------------------
+# سیستم اطلاع‌رسانی خودکار قبل از انقضای اشتراک
+# --------------------------------------------------------------------------------
+async def check_expiry_notifications(context: CallbackContext = None, bot=None):
+    """
+    بررسی کاربران و ارسال هشدار به کانال بکاپ‌گیری ۳ روز قبل از انقضا.
+    این تابع می‌تواند توسط `JobQueue` اجرا شود یا هنگام `start` شدن ربات مستقیماً اجرا شود.
+    """
+    user_data = load_user_data()
+    now = datetime.now().date()
+
+    # مقداردهی `bot` در صورتی که `None` باشد
+    if bot is None:
+        if context and hasattr(context, "bot"):
+            bot = context.bot
+        else:
+            from telegram.ext import Application
+            bot = Application.builder().token(BOT_TOKEN).build().bot  # مقداردهی مستقیم
+
+    # دریافت شناسه عددی کانال بکاپ‌گیری
+    config_data = load_config()
+    backup_channel_id = config_data.get("BACKUP_CHANNEL_ID", None)
+
+    if not backup_channel_id:
+        logger.error("❌ `BACKUP_CHANNEL_ID` در تنظیمات یافت نشد! هشدار ارسال نمی‌شود.")
+        return
+
+    logger.debug("🚀 بررسی هشدار انقضا شروع شد.")
+    found_users = 0  # شمارش کاربران برای تست
+
+    for user_id, details in user_data["users"].items():
+        try:
+            expiry_date = parse_date(details["expiry_date"]).date()
+            remaining_days = (expiry_date - now).days
+
+            logger.debug(f"ℹ️ کاربر {user_id} - انقضا: {expiry_date} - باقی‌مانده: {remaining_days} روز")
+
+            if remaining_days == 3:
+                message = (
+                    f"⚠️ **هشدار انقضای اشتراک!**\n"
+                    f"👤 **کاربر:** {details['name']}\n"
+                    f"🆔 **شناسه:** {user_id}\n"
+                    f"📅 **تاریخ انقضا:** {details['expiry_date']}\n"
+                    f"⏳ **زمان باقی‌مانده:** {remaining_days} روز\n\n"
+                    f"🔄 لطفاً در صورت نیاز تمدید کنید!"
+                )
+
+                # ارسال هشدار به کانال بکاپ‌گیری
+                await bot.send_message(chat_id=backup_channel_id, text=message)
+
+                logger.info(f"✅ هشدار انقضای کاربر {user_id} در کانال {backup_channel_id} ارسال شد.")
+                found_users += 1
+
+        except Exception as e:
+            logger.error(f"❌ خطا در بررسی انقضا برای کاربر {user_id}: {str(e)}")
+
+    if found_users == 0:
+        logger.info("✅ هیچ کاربری برای ارسال هشدار پیدا نشد.")
+
 
 
 # --------------------------------------------------------------------------------
@@ -1183,12 +1422,19 @@ async def start(update: Update, context: CallbackContext):
         reply_markup=MAIN_KEYBOARD,
     )
 
+async def on_startup(application):
+    """ این تابع هنگام `start` شدن ربات اجرا می‌شود و هشدار انقضا را بررسی می‌کند. """
+    logger.info("🔄 بررسی هشدار انقضا هنگام `start` شدن ربات...")
+    await check_expiry_notifications(context=None, bot=application.bot)
+
+
 
 # --------------------------------------------------------------------------------
 # تابع اصلی (main)
 # --------------------------------------------------------------------------------
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
+
 
     # ساخت ConversationHandler برای ایجاد کاربر
     create_user_handler = ConversationHandler(
@@ -1229,6 +1475,7 @@ def main():
     application.add_handler(CallbackQueryHandler(back_to_backup_menu, pattern="back_to_backup_menu"))
     application.add_handler(MessageHandler(filters.Text(["📤 روشن‌کردن بکاپ خودکار"]), enable_auto_backup))
     application.add_handler(MessageHandler(filters.Text(["⛔ خاموش‌کردن بکاپ خودکار"]), disable_auto_backup))
+    application.add_handler(MessageHandler(filters.Regex("^📊 آمار مصرف$"), show_bandwidth_stats))
 
 
     # هندلر تغییر کانال بکاپ
@@ -1243,6 +1490,36 @@ def main():
     application.add_handler(edit_backup_conv)
 
     application.add_handler(CallbackQueryHandler(show_backup_channel, pattern="back_to_backup_menu"))
+
+
+    # هندلر تمدید اشتراک
+    renew_subscription_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🔄 تمدید اشتراک$"), start_renew_subscription)],
+        states={
+            RENEW_SUBSCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_renew_subscription)],
+            GET_SUBSCRIPTION_DURATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_renew_subscription)]
+        },
+        fallbacks=[]
+    )
+
+    application.add_handler(renew_subscription_handler)
+
+
+    # بررسی و ارسال هشدار انقضای اشتراک **هر ۱۲ ساعت**
+    job_queue = application.job_queue
+
+    # هشدار انقضا هر روز ساعت ۱۰ صبح و ۱۰ شب
+    job_queue.run_daily(check_expiry_notifications, time=time(10, 0, 0))
+    job_queue.run_daily(check_expiry_notifications, time=time(22, 0, 0))
+
+    # اجرای اولین هشدار فقط ۱۰ ثانیه بعد از `start` شدن ربات
+    job_queue.run_once(check_expiry_notifications, when=10)
+
+
+
+
+
+
 
     # مقداردهی `JobQueue`
     job_queue = application.job_queue
