@@ -1,4 +1,5 @@
 import logging
+import telegram.constants
 import os
 from logging.handlers import RotatingFileHandler
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
@@ -1270,17 +1271,25 @@ async def backup_files(update, context):
                 else:
                     backup_logger.warning(f"⚠️ فایل {file_path} وجود ندارد و اضافه نشد.")
 
+        # پیام موفقیت اولیه
         await update.message.reply_text("✅ **بکاپ با موفقیت ایجاد شد!**\n📤 فایل در حال ارسال است...")
         backup_logger.info(f"✅ بکاپ با موفقیت ذخیره شد: {backup_file}")
 
         # ارسال فایل بکاپ به چت کاربر
+        caption = (
+            f"📂 *بکاپ ایجاد شد!*\n"
+            f"🔄 این بکاپ شامل اطلاعات سرور و کاربران است.\n"
+            f"📅 تاریخ: `{timestamp}`"
+        )
+        escaped_caption = escape_markdown_v2(caption)  # Escape کردن پیام
+
         with open(backup_file, "rb") as f:
             sent_message = await context.bot.send_document(
                 chat_id=update.effective_chat.id,
                 document=f,
                 filename=f"backup_{timestamp}.zip",
-                caption=f"📂 *بکاپ ایجاد شد!*\n🔄 این بکاپ شامل اطلاعات سرور و کاربران است.\n📅 تاریخ: `{timestamp}`",
-                parse_mode="MarkdownV2"
+                caption=escaped_caption,
+                parse_mode="MarkdownV2"  # ارسال به فرمت MarkdownV2
             )
         
         backup_logger.info(f"📤 بکاپ ارسال شد! پیام ID: {sent_message.message_id}")
@@ -1290,38 +1299,74 @@ async def backup_files(update, context):
         backup_logger.error(f"❌ خطا در ایجاد بکاپ: {str(e)}")
 
 
+
+
 async def restore_files(update, context):
     logger.debug(f"Admin {update.effective_user.id} requested restore files list.")
     backup_path = "/opt/outline_bot/backup_restore/backup_file"
     os.makedirs(backup_path, exist_ok=True)
 
+    # دریافت لیست فایل‌های بکاپ
     backup_files = os.listdir(backup_path)
     backup_files = [f for f in backup_files if f.endswith(".zip")]
     backup_files.sort()
 
-    keyboard = []
-    if backup_files:
-        keyboard.extend([[InlineKeyboardButton(file, callback_data=f"restore_{file}")] for file in backup_files])
-    else:
-        await update.message.reply_text("❌ هیچ بکاپی در سرور وجود ندارد.")
+    # تقسیم فایل‌ها به صفحات
+    page_size = 5  # تعداد دکمه‌ها در هر صفحه
+    current_page = int(context.user_data.get("restore_page", 0))
+    total_pages = (len(backup_files) + page_size - 1) // page_size
+
+    # فایل‌های مربوط به صفحه جاری
+    start = current_page * page_size
+    end = start + page_size
+    current_files = backup_files[start:end]
+
+    # ساخت دکمه‌ها
+    keyboard = [
+        [InlineKeyboardButton(file, callback_data=f"restore_{file}")]
+        for file in current_files
+    ]
+
+    # افزودن دکمه‌های صفحه‌بندی
+    navigation_buttons = []
+    if current_page > 0:
+        navigation_buttons.append(InlineKeyboardButton("⏪ قبلی", callback_data="restore_prev_page"))
+    if current_page < total_pages - 1:
+        navigation_buttons.append(InlineKeyboardButton("⏩ بعدی", callback_data="restore_next_page"))
+
+    if navigation_buttons:
+        keyboard.append(navigation_buttons)
 
     # دکمه آپلود فایل
-    keyboard.append([InlineKeyboardButton("ارسال فایل از سیستم", callback_data="upload_backup")])
+    keyboard.append([InlineKeyboardButton("📤 ارسال فایل از سیستم", callback_data="upload_backup")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("لطفاً یک فایل برای ریستور انتخاب کنید:", reply_markup=reply_markup)
-    backup_logger.info(f"Available backups listed for restore: {backup_files}")
+
+    # ارسال پیام با صفحه جاری
+    await update.message.reply_text(
+        f"📂 لطفاً یک فایل برای ریستور انتخاب کنید:\nصفحه {current_page + 1} از {total_pages}",
+        reply_markup=reply_markup
+    )
+
 
 async def handle_restore_callback(update, context):
     query = update.callback_query
     await query.answer()
 
     data = query.data
+
     if data.startswith("restore_"):
         file_name = data.replace("restore_", "")
         await restore_selected_file(file_name, update, from_user_upload=False)
+    elif data == "restore_prev_page":
+        context.user_data["restore_page"] = context.user_data.get("restore_page", 0) - 1
+        await restore_files(update, context)
+    elif data == "restore_next_page":
+        context.user_data["restore_page"] = context.user_data.get("restore_page", 0) + 1
+        await restore_files(update, context)
     elif data == "upload_backup":
         await prompt_upload_backup(update, context)
+
 
 async def prompt_upload_backup(update: Update, context: CallbackContext):
     logger.debug("Prompting user to upload backup file...")
