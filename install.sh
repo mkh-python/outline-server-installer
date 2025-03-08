@@ -64,7 +64,7 @@ if [[ "$HAS_DOMAIN" =~ ^[Yy](es|ES)?$ ]]; then
     DOMAIN_IP=$(ping -4 -c 1 "$DOMAIN_NAME" | grep -oP '(\d{1,3}\.){3}\d{1,3}' | head -n 1)
 
     # استخراج IP سرور (فقط IPv4)
-    SERVER_IP=$(curl -4 -s ifconfig.me)
+    SERVER_IP=$(curl -4 -s icanhazip.com)
 
     # بررسی هماهنگی IP دامین با IP سرور
     if [ "$DOMAIN_IP" == "$SERVER_IP" ]; then
