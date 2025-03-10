@@ -1139,6 +1139,7 @@ async def check_expiry_notifications(context: CallbackContext = None, bot=None):
                     f"🆔 **شناسه:** {user_id}\n"
                     f"📅 **تاریخ انقضا:** {details['expiry_date']}\n"
                     f"⏳ **زمان باقی‌مانده:** {remaining_days} روز\n\n"
+                    f"📞 **تماس:** {details.get('contact_info', 'نامشخص')}\n"
                     f"🔄 لطفاً در صورت نیاز تمدید کنید!"
                 )
 
