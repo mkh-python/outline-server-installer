@@ -56,6 +56,79 @@ else
 fi
 
 # پرسیدن دامین از کاربر
+# 📦 نصب cloudflared (در صورت نصب نبودن)
+if ! command -v cloudflared &> /dev/null; then
+    echo "در حال نصب Cloudflare Tunnel..."
+    wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+    sudo dpkg -i cloudflared-linux-amd64.deb
+fi
+
+# 🔐 احراز هویت اولیه با Cloudflare
+echo "لطفاً پنجره مرورگر را باز کرده و دامنه خود را در Cloudflare تأیید کنید."
+cloudflared tunnel login
+
+# دریافت نام دامنه
+read -p "لطفاً دامنه اصلی خود را وارد کنید (مثلاً vpnmkh.com): " ROOT_DOMAIN
+PREFIX="mkhpnora"
+FULL_SUBDOMAIN="$PREFIX.$ROOT_DOMAIN"
+
+# بررسی تونل‌های موجود
+EXISTING_TUNNELS=$(cloudflared tunnel list -o json | jq -r '.[].name')
+
+TUNNEL_EXISTS=false
+for TUN in $EXISTING_TUNNELS; do
+    if [[ "$TUN" == "$PREFIX" ]]; then
+        TUNNEL_EXISTS=true
+        break
+    fi
+done
+
+if $TUNNEL_EXISTS; then
+    echo "تونلی با نام '$PREFIX' از قبل وجود دارد."
+    read -p "آیا می‌خواهید آن را حذف کرده و جدید بسازید؟ (y/n): " DELETE_EXISTING
+
+    if [[ "$DELETE_EXISTING" =~ ^[Yy](es|ES)?$ ]]; then
+        echo "حذف تونل قبلی..."
+        cloudflared tunnel delete $PREFIX
+        cloudflared tunnel cleanup
+    else
+        # پیدا کردن نام آزاد بعدی
+        i=1
+        while cloudflared tunnel list -o json | jq -r '.[].name' | grep -q "${PREFIX}${i}"; do
+            ((i++))
+        done
+        PREFIX="${PREFIX}${i}"
+        FULL_SUBDOMAIN="$PREFIX.$ROOT_DOMAIN"
+        echo "✅ تونل جدید با نام: $PREFIX"
+    fi
+fi
+
+# ساخت تونل جدید
+cloudflared tunnel create $PREFIX
+TUNNEL_ID=$(cat /root/.cloudflared/${PREFIX}.json | jq -r .tunnel_id)
+
+# ساخت فایل کانفیگ tunnel برای روت کردن همه پورت‌ها
+mkdir -p /root/.cloudflared
+cat <<EOF > /root/.cloudflared/config.yml
+tunnel: $TUNNEL_ID
+credentials-file: /root/.cloudflared/${PREFIX}.json
+
+ingress:
+  - hostname: $FULL_SUBDOMAIN
+    service: http://localhost:15978
+  - service: http_status:404
+EOF
+
+# اتصال ساب‌دامین به Cloudflare DNS
+cloudflared tunnel route dns $PREFIX $FULL_SUBDOMAIN
+
+# اجرای دائمی سرویس تونل
+cloudflared service install
+systemctl enable cloudflared
+systemctl start cloudflared
+
+# نمایش دامنه نهایی
+API_URL="https://$FULL_SUBDOMAIN"
 read -p "آیا دامین دارید؟ (y/n): " HAS_DOMAIN
 if [[ "$HAS_DOMAIN" =~ ^[Yy](es|ES)?$ ]]; then
     read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
