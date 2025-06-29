@@ -147,9 +147,7 @@ systemctl start cloudflared
 
 # نمایش دامنه نهایی
 API_URL="https://$FULL_SUBDOMAIN"
-read -p "آیا دامین دارید؟ (y/n): " HAS_DOMAIN
 if [[ "$HAS_DOMAIN" =~ ^[Yy](es|ES)?$ ]]; then
-    read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
 
     # استخراج IP دامین (فقط IPv4)
     DOMAIN_IP=$(ping -4 -c 1 "$DOMAIN_NAME" | grep -oP '(\d{1,3}\.){3}\d{1,3}' | head -n 1)
@@ -176,7 +174,11 @@ fi
 
 # استخراج مقادیر certSha256 و apiUrl از فایل access.txt
 CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
-OUTLINE_API_URL="$API_URL:$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')"
+
+PORT=$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')
+API_URL="https://$FULL_SUBDOMAIN"
+OUTLINE_API_URL="$API_URL:$PORT"
+
 
 # بررسی استخراج موفقیت‌آمیز داده‌ها
 if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
