@@ -1,121 +1,91 @@
 #!/bin/bash
 
+set -e
+
 echo "🔐 در حال نصب Cloudflare Tunnel..."
 
-# نصب Cloudflared
-apt update && apt install -y curl jq
-curl -L -o cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-dpkg -i cloudflared.deb || apt install -f -y
+# نصب پکیج‌های موردنیاز
+apt update && apt install -y curl wget sudo gnupg lsb-release unzip jq
 
-# دریافت دامنه اصلی
-read -p "لطفاً نام دامنه اصلی خود را وارد کنید (مثلاً iritjob.ir): " ROOT_DOMAIN
+# نصب Docker اگر نبود
+if ! command -v docker &>/dev/null; then
+  echo "> Verifying that Docker is installed .......... NOT INSTALLED"
+  read -p "> Would you like to install Docker? This will run 'curl https://get.docker.com/ | sh'. [Y/n] " confirm
+  if [[ $confirm =~ ^[Yy]$ || $confirm == "" ]]; then
+    curl -fsSL https://get.docker.com | sh
+  else
+    echo "❌ Docker لازم است. نصب لغو شد."; exit 1
+  fi
+fi
+
+echo "> Verifying Docker installation .....OK"
+
+# نصب cloudflared
+wget -O cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+dpkg -i cloudflared.deb
+
+# گرفتن اطلاعات
+read -p "لطفاً نام دامنه اصلی خود را وارد کنید (مثلاً iritjob.ir): " DOMAIN
 SUBDOMAIN="outlinemkh"
-FULL_DOMAIN="${SUBDOMAIN}.${ROOT_DOMAIN}"
+FULL_DOMAIN="$SUBDOMAIN.$DOMAIN"
 
-# دریافت تنظیمات ربات
-read -p "لطفاً توکن ربات تلگرام را وارد کنید: " BOT_TOKEN
-ADMINS=()
-while true; do
-    read -p "آیدی عددی مدیر را وارد کنید (یا n برای اتمام): " ADMIN_ID
-    [[ "$ADMIN_ID" == "n" ]] && break
-    ADMINS+=("$ADMIN_ID")
-done
-read -p "لینک کانال بکاپ (عمومی یا خصوصی): " BACKUP_CHANNEL
-read -p "🔢 آیدی عددی کانال خصوصی را وارد کنید (مثل -1001234567890): " PRIVATE_CHANNEL
-
-# نصب Outline
-echo "⚙️ نصب سرور Outline..."
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/Jigsaw-Code/outline-server/master/src/server_manager/install_scripts/install_server.sh)"
-
-# دریافت اطلاعات Outline
-API_URL=$(cat /opt/outline/access.txt | grep apiUrl | cut -d '"' -f4)
-CERT_SHA=$(cat /opt/outline/access.txt | grep certSha256 | cut -d '"' -f4)
-
-# ورود به Cloudflare
+# ورود به اکانت Cloudflare
 echo "🌐 ورود به حساب Cloudflare برای ایجاد تونل..."
 cloudflared tunnel login
 
-# بررسی و حذف تونل قبلی در صورت وجود
-echo "🔁 بررسی وجود تونل قبلی با نام outline-tunnel..."
-EXISTING_TUNNEL_ID=$(cloudflared tunnel list --output json 2>/dev/null | jq -r '.[] | select(.name=="outline-tunnel") | .id')
-if [[ -n "$EXISTING_TUNNEL_ID" ]]; then
-    echo "⚠️ تونل قبلی پیدا شد. در حال حذف..."
-    cloudflared tunnel delete outline-tunnel || true
-    cloudflared tunnel cleanup || true
-    rm -f /root/.cloudflared/outline-tunnel.json
-    rm -f /etc/cloudflared/config.yml
-    systemctl stop cloudflared 2>/dev/null
-    systemctl disable cloudflared 2>/dev/null
-    rm -f /etc/systemd/system/cloudflared.service
-    systemctl daemon-reexec
-    echo "✅ تونل قبلی حذف شد."
+# حذف تونل قبلی اگر وجود دارد
+EXISTING_ID=$(cloudflared tunnel list --output json | jq -r '.[] | select(.name=="outline-tunnel") | .id')
+
+if [[ -n "$EXISTING_ID" ]]; then
+  echo "🔁 بررسی وجود تونل قبلی با نام outline-tunnel..."
+  echo "⚠️ تونل قبلی پیدا شد. در حال حذف..."
+  cloudflared tunnel delete outline-tunnel || true
+  rm -f /root/.cloudflared/outline-tunnel.json || true
 fi
 
-# ایجاد تونل جدید
+# ساخت تونل جدید
 cloudflared tunnel create outline-tunnel
 
-# تنظیم config.yml
+# ساخت فایل تنظیمات cloudflared
+CREDENTIAL_PATH=$(find /root/.cloudflared -name "*.json" | grep outline-tunnel | head -n 1)
 mkdir -p /etc/cloudflared
+
 cat > /etc/cloudflared/config.yml <<EOF
 tunnel: outline-tunnel
-credentials-file: /root/.cloudflared/outline-tunnel.json
+credentials-file: ${CREDENTIAL_PATH}
 ingress:
   - hostname: ${FULL_DOMAIN}
     service: https://localhost
   - service: http_status:404
 EOF
 
-# اتصال ساب‌دامین به تونل
-cloudflared tunnel route dns outline-tunnel ${FULL_DOMAIN}
+# اضافه‌کردن روت دامنه در کلادفلر
+cloudflared tunnel route dns outline-tunnel "$FULL_DOMAIN"
 
-# نصب و راه‌اندازی سرویس Cloudflared
-cloudflared service install
-systemctl enable cloudflared
-systemctl restart cloudflared
-
-# نصب پکیج‌های مورد نیاز بات
-cd /opt
-git clone https://github.com/Jigsaw-Code/outline-server.git outline_bot
-cd outline_bot
-python3 -m venv outline_env
-source outline_env/bin/activate
-pip install --upgrade pip
-pip install python-telegram-bot requests pytz httpx "apscheduler<3.12.0"
-
-# ذخیره تنظیمات در .config.json
-cat > /opt/outline_bot/.config.json <<EOF
-{
-  "BOT_TOKEN": "$BOT_TOKEN",
-  "ADMINS": [$(printf '"%s",' "${ADMINS[@]}" | sed 's/,$//')],
-  "BACKUP_CHANNEL": "$BACKUP_CHANNEL",
-  "PRIVATE_CHANNEL_ID": "$PRIVATE_CHANNEL",
-  "OUTLINE_API_URL": "$API_URL",
-  "CERT_SHA256": "$CERT_SHA"
-}
-EOF
-
-# تعریف سرویس systemd برای ربات
-cat > /etc/systemd/system/outline_bot.service <<EOF
+# ساخت سرویس systemd
+cat > /etc/systemd/system/cloudflared.service <<EOF
 [Unit]
-Description=Outline Bot Service
+Description=Cloudflare Tunnel
 After=network.target
 
 [Service]
-User=root
-WorkingDirectory=/opt/outline_bot
-ExecStart=/opt/outline_bot/outline_env/bin/python3 /opt/outline_bot/outline_bot.py
+TimeoutStartSec=0
+Type=notify
+ExecStart=/usr/bin/cloudflared tunnel run --config /etc/cloudflared/config.yml
 Restart=always
-TimeoutStopSec=10
-StandardOutput=append:/opt/outline_bot/service.log
-StandardError=append:/opt/outline_bot/service.log
+RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# اجرای سرویس ربات
-systemctl daemon-reload
-systemctl enable outline_bot
-systemctl start outline_bot
+systemctl daemon-reexec
+systemctl enable cloudflared
+systemctl restart cloudflared
 
+# نصب Outline
+echo "⚙️ نصب سرور Outline..."
+bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-server/master/src/server_manager/install_scripts/install_server.sh)"
+
+# نمایش موفقیت
 echo "✅ نصب کامل شد. ربات روی https://${FULL_DOMAIN} فعال شده و تمام ترافیک Outline از طریق Cloudflare Tunnel عبور می‌کند."
