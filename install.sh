@@ -1,123 +1,151 @@
 #!/bin/bash
+set -euo pipefail
 
-set -e
-
-CYAN='\033[0;36m'
-RESET='\033[0m'
-
-echo -e "${CYAN}🔧 به‌روزرسانی سیستم و نصب ابزارهای لازم...${RESET}"
+# 🎯 بروز رسانی و نصب پیش‌نیازها
 apt update && apt upgrade -y
-apt install -y curl wget sudo unzip python3 python3-venv python3-pip jq docker.io
+apt install -y python3 python3-pip python3-venv curl jq docker.io wget git build-essential
 
-echo -e "${CYAN}🐳 راه‌اندازی Docker...${RESET}"
-systemctl enable docker
-systemctl start docker
-
-echo -e "${CYAN}🌐 نصب Cloudflared و ورود به حساب Cloudflare...${RESET}"
-wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -O cloudflared.deb
+# ⛳ نصب Cloudflared
+echo "🌐 نصب Cloudflared و ورود به حساب Cloudflare..."
+wget -O cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
 dpkg -i cloudflared.deb
 
-read -p "لطفاً نام دامنه اصلی خود را وارد کنید (مثلاً iritjob.ir): " MAIN_DOMAIN
-SUB_DOMAIN="outlinemkh.$MAIN_DOMAIN"
+# گرفتن دامنه اصلی
+read -p "لطفاً نام دامنه اصلی خود را وارد کنید (مثلاً iritjob.ir): " DOMAIN
+SUBDOMAIN="outlinemkh"
+FULL_DOMAIN="${SUBDOMAIN}.${DOMAIN}"
 
-echo -e "${CYAN}🌐 ورود به Cloudflare برای ایجاد Tunnel...${RESET}"
-cloudflared login
+# ورود به حساب Cloudflare
+cloudflared tunnel login
 
-TUN_NAME="outline-tunnel"
-EXISTING_TUNNEL=$(cloudflared tunnel list --output json | jq -r ".[] | select(.name==\"$TUN_NAME\") | .id")
-
-if [ -n "$EXISTING_TUNNEL" ]; then
-  echo "⚠️ تونل با نام $TUN_NAME وجود دارد. حذف در حال انجام..."
-  cloudflared tunnel delete "$TUN_NAME"
-  rm -f /root/.cloudflared/*.json
+# حذف تونل قبلی در صورت وجود
+if cloudflared tunnel list | grep -q "outline-tunnel"; then
+    echo "⚠️ تونل با نام outline-tunnel وجود دارد. حذف در حال انجام..."
+    cloudflared tunnel delete outline-tunnel || true
+    rm -f /root/.cloudflared/*.json
 fi
 
-TUN_ID=$(cloudflared tunnel create "$TUN_NAME" | grep "Tunnel credentials written" | awk '{print $4}')
-TUN_ID_FILENAME=$(basename "$TUN_ID")
+# ساخت تونل جدید و دریافت ID
+cloudflared tunnel create outline-tunnel | tee tunnel_output.log
+TUNNEL_ID=$(grep -oP 'Created tunnel.*id \K[\w-]+' tunnel_output.log)
+CREDENTIAL_PATH="/root/.cloudflared/${TUNNEL_ID}.json"
 
-echo -e "${CYAN}📄 تنظیم فایل config.yml برای Cloudflare Tunnel...${RESET}"
+# تنظیم config.yml
+mkdir -p /etc/cloudflared
 cat > /etc/cloudflared/config.yml <<EOF
-tunnel: $TUN_NAME
-credentials-file: /root/.cloudflared/$TUN_ID_FILENAME
+tunnel: outline-tunnel
+credentials-file: ${CREDENTIAL_PATH}
 ingress:
-  - hostname: $SUB_DOMAIN
+  - hostname: ${FULL_DOMAIN}
     service: https://localhost
   - service: http_status:404
 EOF
 
-cloudflared tunnel route dns "$TUN_NAME" "$SUB_DOMAIN"
+# اتصال ساب‌دامین
+cloudflared tunnel route dns outline-tunnel ${FULL_DOMAIN}
+
+# فعال‌سازی Systemd برای Cloudflared
+cat > /etc/systemd/system/cloudflared.service <<EOF
+[Unit]
+Description=Cloudflare Tunnel
+After=network.target
+
+[Service]
+TimeoutStartSec=0
+Type=notify
+ExecStart=/usr/bin/cloudflared tunnel run outline-tunnel
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
 systemctl enable cloudflared
 systemctl restart cloudflared
 
-echo -e "${CYAN}🛠 نصب Outline Server...${RESET}"
+echo "✅ Cloudflare Tunnel راه‌اندازی شد روی https://${FULL_DOMAIN}"
+
+# ⚙️ نصب Outline Server
+echo "📦 نصب Outline Server..."
 bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-server/master/src/server_manager/install_scripts/install_server.sh)"
 
-OUTLINE_ACCESS=$(find /root -type f -name "access.txt" | head -n 1)
-CERT_SHA256=$(grep "certSha256:" $OUTLINE_ACCESS | cut -d':' -f2 | tr -d ' ')
-API_PORT=$(grep "apiUrl:" $OUTLINE_ACCESS | cut -d':' -f4)
-OUTLINE_API_URL="https://$SUB_DOMAIN:$API_PORT"
+# استخراج اطلاعات دسترسی
+ACCESS_FILE="/opt/outline/access.txt"
+CERT_SHA256=$(grep "certSha256:" $ACCESS_FILE | cut -d':' -f2 | tr -d '" ')
+API_PORT=$(grep "apiUrl:" $ACCESS_FILE | awk -F':' '{print $4}' | cut -d'/' -f1)
+OUTLINE_API_URL="https://${FULL_DOMAIN}:${API_PORT}"
+OUTLINE_API_KEY=$(grep -oP '"apiKey":"\K[^"]+' $ACCESS_FILE)
 
-echo "✅ Outline نصب شد. آدرس: $OUTLINE_API_URL"
-
-# ──────────────────────────────────────────────
-# ⚙️ نصب و پیکربندی ربات Telegram
-# ──────────────────────────────────────────────
-read -p "توکن ربات تلگرام را وارد کنید: " BOT_TOKEN
-
-ADMIN_IDS=()
-while true; do
-  read -p "آیدی عددی مدیر را وارد کنید (یا n برای پایان): " ADMIN_ID
-  [[ "$ADMIN_ID" == "n" ]] && break
-  ADMIN_IDS+=("$ADMIN_ID")
-done
-
-read -p "📥 لینک کانال بکاپ (عمومی یا خصوصی): " BACKUP_CHANNEL
-if [[ "$BACKUP_CHANNEL" =~ ^https://t.me/\+ ]]; then
-  read -p "🔢 آیدی عددی کانال خصوصی (مثل -1001234567890): " BACKUP_CHANNEL_ID
-else
-  BACKUP_CHANNEL_ID=null
-fi
-
+# 📂 تنظیمات ربات
 mkdir -p /opt/outline_bot
 cd /opt/outline_bot
 python3 -m venv outline_env
 source outline_env/bin/activate
-pip install --upgrade pip
-pip install requests python-telegram-bot pytz "python-telegram-bot[job-queue]"
 
+# دانلود سورس ربات
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/outline_bot.py
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/delete_user.py
 wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/users_data.json
+wget -q https://raw.githubusercontent.com/mkh-python/outline-server-installer/main/update.sh
 
-cat > /opt/outline_bot/.config.json <<EOF
+# نصب پکیج‌ها
+pip install --upgrade pip
+pip install requests python-telegram-bot pytz "python-telegram-bot[job-queue]"
+
+# دریافت مقادیر از کاربر
+read -p "لطفاً توکن ربات تلگرام را وارد کنید: " BOT_TOKEN
+ADMIN_IDS=()
+while true; do
+    read -p "لطفاً آیدی عددی مدیر را وارد کنید (یا n برای پایان): " ID
+    [[ "$ID" == "n" ]] && break
+    ADMIN_IDS+=("$ID")
+done
+
+# کانال بکاپ
+while true; do
+    read -p "لینک کانال (با @ یا لینک خصوصی): " BACKUP_CHANNEL
+    if [[ "$BACKUP_CHANNEL" =~ ^@ ]]; then
+        BACKUP_CHANNEL_ID="null"
+        break
+    elif [[ "$BACKUP_CHANNEL" =~ ^https://t.me/\+ ]]; then
+        read -p "🔢 آیدی عددی کانال خصوصی (-100...) را وارد کنید: " BACKUP_CHANNEL_ID
+        break
+    else
+        echo "❌ فرمت نادرست."
+    fi
+done
+
+# ذخیره فایل کانفیگ
+cat > .config.json <<EOF
 {
   "OUTLINE_API_URL": "$OUTLINE_API_URL",
+  "OUTLINE_API_KEY": "$OUTLINE_API_KEY",
   "CERT_SHA256": "$CERT_SHA256",
   "BOT_TOKEN": "$BOT_TOKEN",
-  "ADMIN_IDS": [$(IFS=, ; echo "${ADMIN_IDS[*]}")],
+  "ADMIN_IDS": [$(IFS=,; echo "${ADMIN_IDS[*]}")],
   "BACKUP_CHANNEL": "$BACKUP_CHANNEL",
-  "BACKUP_CHANNEL_ID": "$BACKUP_CHANNEL_ID"
+  "BACKUP_CHANNEL_ID": $BACKUP_CHANNEL_ID
 }
 EOF
 
-mkdir -p /opt/outline_bot/logs
-touch /opt/outline_bot/service.log
+# ساخت فولدر لاگ
+mkdir -p logs && touch logs/bot.log
 
-# کرون‌جاب حذف کاربر منقضی‌شده
+# کران‌جاب برای حذف کاربران منقضی‌شده
 (crontab -l 2>/dev/null; echo "0 0 * * * /opt/outline_bot/outline_env/bin/python3 /opt/outline_bot/delete_user.py") | crontab -
 
+# فعال‌سازی systemd برای ربات
 cat > /etc/systemd/system/outline_bot.service <<EOF
 [Unit]
 Description=Outline Bot Service
 After=network.target
 
 [Service]
-User=root
 WorkingDirectory=/opt/outline_bot
 ExecStart=/opt/outline_bot/outline_env/bin/python3 /opt/outline_bot/outline_bot.py
 Restart=always
-StandardOutput=append:/opt/outline_bot/service.log
-StandardError=append:/opt/outline_bot/service.log
+TimeoutStopSec=10
 
 [Install]
 WantedBy=multi-user.target
@@ -125,12 +153,9 @@ EOF
 
 timedatectl set-timezone Asia/Tehran
 systemctl daemon-reload
-systemctl enable outline_bot.service
-systemctl start outline_bot.service
+systemctl enable outline_bot
+systemctl restart outline_bot
 
 # پیام نهایی
-curl -s -X POST https://api.telegram.org/bot$BOT_TOKEN/sendMessage \
--d "chat_id=${ADMIN_IDS[0]}" \
--d "text=✅ سرور و ربات نصب شدند.\n\n🌐 آدرس: $OUTLINE_API_URL\n🔐 کد TLS: $CERT_SHA256\n\n🛠 از منیجر برای اتصال استفاده کنید."
-
-echo -e "${CYAN}✅ نصب کامل شد. سرور روی $SUB_DOMAIN فعال است و ترافیک از Cloudflare Tunnel عبور می‌کند.${RESET}"
+curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" -d "chat_id=${ADMIN_IDS[0]}" -d "text=🚀 نصب کامل شد. سرور شما در https://${FULL_DOMAIN} فعال است.\n\n🔐 apiUrl:\n${OUTLINE_API_URL}\nSHA256: ${CERT_SHA256}"
+echo "✅ نصب کامل شد. ربات و سرور آماده‌اند."
