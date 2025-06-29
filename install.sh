@@ -56,117 +56,12 @@ else
 fi
 
 # پرسیدن دامین از کاربر
-# 📦 نصب cloudflared (در صورت نصب نبودن)
-if ! command -v cloudflared &> /dev/null; then
-    echo "در حال نصب Cloudflare Tunnel..."
-    wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-    sudo dpkg -i cloudflared-linux-amd64.deb
-fi
-
-# 🔐 احراز هویت اولیه با Cloudflare
-echo "لطفاً پنجره مرورگر را باز کرده و دامنه خود را در Cloudflare تأیید کنید."
-cloudflared tunnel login
-
-# دریافت نام دامنه
-PREFIX="mkhpnora"
-FULL_SUBDOMAIN="$PREFIX.$ROOT_DOMAIN"
-
-# بررسی تونل‌های موجود
-EXISTING_TUNNELS=$(cloudflared tunnel list -o json | jq -r '.[].name')
-
-TUNNEL_EXISTS=false
-for TUN in $EXISTING_TUNNELS; do
-    if [[ "$TUN" == "$PREFIX" ]]; then
-        TUNNEL_EXISTS=true
-        break
-    fi
-done
-
-if $TUNNEL_EXISTS; then
-    echo "تونلی با نام '$PREFIX' از قبل وجود دارد."
-
-    if [[ "$DELETE_EXISTING" =~ ^[Yy](es|ES)?$ ]]; then
-        echo "حذف تونل قبلی..."
-        cloudflared tunnel delete $PREFIX
-        cloudflared tunnel cleanup
-    else
-        # پیدا کردن نام آزاد بعدی
-        i=1
-        while cloudflared tunnel list -o json | jq -r '.[].name' | grep -q "${PREFIX}${i}"; do
-            ((i++))
-        done
-        PREFIX="${PREFIX}${i}"
-        FULL_SUBDOMAIN="$PREFIX.$ROOT_DOMAIN"
-        echo "✅ تونل جدید با نام: $PREFIX"
-    fi
-fi
-
-# ساخت تونل جدید
-cloudflared tunnel create $PREFIX
-TUNNEL_ID=$(cat /root/.cloudflared/${PREFIX}.json | jq -r .tunnel_id)
-
-# ساخت فایل کانفیگ tunnel برای روت کردن همه پورت‌ها
-mkdir -p /root/.cloudflared
-cat <<EOF > /root/.cloudflared/config.yml
-tunnel: $TUNNEL_ID
-credentials-file: /root/.cloudflared/${PREFIX}.json
-
-ingress:
-  - hostname: $FULL_SUBDOMAIN
-    service: http://localhost:15978
-  - service: http_status:404
-EOF
-
-# اتصال ساب‌دامین به Cloudflare DNS
-cloudflared tunnel route dns $PREFIX $FULL_SUBDOMAIN
-
-# اجرای دائمی سرویس تونل
-
-# اجرای دائمی سرویس تونل - ساخت دستی systemd
-CLOUDFLARED_PATH=$(which cloudflared)
-
-cat <<EOF > /etc/systemd/system/cloudflared.service
-[Unit]
-Description=Cloudflare Tunnel
-After=network.target
-
-[Service]
-Restart=always
-ExecStart=$CLOUDFLARED_PATH tunnel run $PREFIX
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable cloudflared
-systemctl start cloudflared
-
-
-# نمایش دامنه نهایی
-API_URL="https://$FULL_SUBDOMAIN"
-if [[ "$HAS_DOMAIN" =~ ^[Yy](es|ES)?$ ]]; then
-
-    # استخراج IP دامین (فقط IPv4)
-
-    # استخراج IP سرور (فقط IPv4)
-
-    # بررسی هماهنگی IP دامین با IP سرور
-        echo "دامین با IP سرور هماهنگ است. ادامه می‌دهیم..."
-    else
-        echo "خطا: دامین وارد شده با IP سرور هماهنگ نیست. لطفاً بررسی کنید."
-        exit 1
-    fi
 else
     # اگر کاربر دامین نداشت، استفاده از IP سرور
 fi
 
 # استخراج مقادیر certSha256 و apiUrl از فایل access.txt
 CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
-
-PORT=$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')
-API_URL="https://$FULL_SUBDOMAIN"
-
 
 # بررسی استخراج موفقیت‌آمیز داده‌ها
 if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
@@ -191,10 +86,12 @@ EOF
 chmod 600 $CONFIG_FILE
 
 # دریافت توکن تلگرام
+read -p "لطفاً توکن ربات تلگرام را وارد کنید: " BOT_TOKEN
 
 # دریافت آیدی مدیران
 ADMIN_IDS=()
 while true; do
+    read -p "لطفاً آیدی عددی مدیر را وارد کنید (یا n برای اتمام): " ADMIN_ID
     if [ "$ADMIN_ID" = "n" ]; then
         break
     fi
@@ -214,6 +111,7 @@ fi
 
 # دریافت لینک کانال برای بکاپ خودکار
 while true; do
+    read -p "لطفاً لینک کانال تلگرام خود را برای بکاپ خودکار وارد کنید (عمومی یا خصوصی): " BACKUP_CHANNEL
     BACKUP_CHANNEL=$(echo "$BACKUP_CHANNEL" | tr -d ' ')
 
     if [[ "$BACKUP_CHANNEL" =~ ^@([a-zA-Z0-9_]{5,32})$ ]]; then
@@ -224,6 +122,7 @@ while true; do
         echo "✅ لینک کانال خصوصی تایید شد: $BACKUP_CHANNEL"
         
         while true; do
+            read -p "🔢 لطفاً آیدی عددی کانال خصوصی خود را وارد کنید (مانند -1001234567890): " BACKUP_CHANNEL_ID
             
             if [[ "$BACKUP_CHANNEL_ID" =~ ^-100[0-9]{9,10}$ ]]; then
                 echo "✅ آیدی عددی تایید شد: $BACKUP_CHANNEL_ID"
@@ -327,3 +226,9 @@ sudo systemctl start outline_bot.service
 
 # پیام پایان نصب
 echo "نصب و راه‌اندازی ربات و سرور Outline کامل شد. سرویس به صورت خودکار اجرا شده است."
+
+# استخراج مقادیر certSha256 و apiUrl از فایل access.txt با استفاده از دامنه Cloudflare Tunnel
+CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
+API_PORT=$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')
+TUNNEL_DOMAIN=$(cat /opt/outline_bot/tunnel_domain.txt)
+OUTLINE_API_URL="https://$TUNNEL_DOMAIN:$API_PORT"
