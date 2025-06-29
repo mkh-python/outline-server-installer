@@ -13,7 +13,10 @@ if ! command -v cloudflared &> /dev/null; then
 fi
 
 # ------------------- بخش 3: دریافت اطلاعات -------------------
-read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
+read -p "لطفاً نام دامنه اصلی خود را وارد کنید (مثلاً iritjob.ir): " ROOT_DOMAIN
+SUBDOMAIN="outlinemkh"
+DOMAIN_NAME="${SUBDOMAIN}.${ROOT_DOMAIN}"
+
 read -p "لطفاً توکن ربات تلگرام را وارد کنید: " BOT_TOKEN
 
 ADMIN_IDS=()
@@ -47,11 +50,10 @@ echo "⚙️ نصب سرور Outline..."
 sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/Jigsaw-Code/outline-server/master/src/server_manager/install_scripts/install_server.sh)"
 
 # ------------------- بخش 5: استخراج اطلاعات -------------------
-API_URL="https://$DOMAIN_NAME"
 CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2 | tr -d ' ')
 OUTLINE_PORT=$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}' | tr -d '} ')
-OUTLINE_API_URL="$API_URL:$OUTLINE_PORT"
 OUTLINE_API_KEY=$(grep "apiKey:" /opt/outline/access.txt | cut -d':' -f2 | tr -d ' "')
+OUTLINE_API_URL="https://${DOMAIN_NAME}:${OUTLINE_PORT}"
 
 # ------------------- بخش 6: راه‌اندازی Cloudflare Tunnel -------------------
 echo "🌐 ورود به حساب Cloudflare برای ایجاد تونل..."
@@ -130,4 +132,4 @@ sudo systemctl daemon-reload
 sudo systemctl enable outline_bot
 sudo systemctl start outline_bot
 
-echo "✅ نصب کامل شد. همه چیز اکنون از طریق Cloudflare Tunnel در دسترس است."
+echo "✅ نصب کامل شد. ربات روی ${DOMAIN_NAME} فعال شده و همه ترافیک از تونل عبور می‌کند."
