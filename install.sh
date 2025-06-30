@@ -56,12 +56,36 @@ else
 fi
 
 # پرسیدن دامین از کاربر
+read -p "آیا دامین دارید؟ (y/n): " HAS_DOMAIN
+if [[ "$HAS_DOMAIN" =~ ^[Yy](es|ES)?$ ]]; then
+    read -p "لطفاً دامین خود را وارد کنید: " DOMAIN_NAME
+
+    # استخراج IP دامین (فقط IPv4)
+    DOMAIN_IP=$(ping -4 -c 1 "$DOMAIN_NAME" | grep -oP '(\d{1,3}\.){3}\d{1,3}' | head -n 1)
+
+    # استخراج IP سرور (فقط IPv4)
+    SERVER_IP=$(curl -4 -s icanhazip.com)
+
+    # بررسی هماهنگی IP دامین با IP سرور
+    if [ "$DOMAIN_IP" == "$SERVER_IP" ]; then
+        echo "دامین با IP سرور هماهنگ است. ادامه می‌دهیم..."
+        API_URL="https://$DOMAIN_NAME"
+    else
+        echo "خطا: دامین وارد شده با IP سرور هماهنگ نیست. لطفاً بررسی کنید."
+        echo "دامین وارد شده: $DOMAIN_NAME"
+        echo "IP دامین: $DOMAIN_IP"
+        echo "IP سرور: $SERVER_IP"
+        exit 1
+    fi
 else
     # اگر کاربر دامین نداشت، استفاده از IP سرور
+    SERVER_IP=$(curl -4 -s ifconfig.me)
+    API_URL="https://$SERVER_IP"
 fi
 
 # استخراج مقادیر certSha256 و apiUrl از فایل access.txt
 CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
+OUTLINE_API_URL="$API_URL:$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')"
 
 # بررسی استخراج موفقیت‌آمیز داده‌ها
 if [ -z "$CERT_SHA256" ] || [ -z "$OUTLINE_API_URL" ]; then
@@ -226,9 +250,3 @@ sudo systemctl start outline_bot.service
 
 # پیام پایان نصب
 echo "نصب و راه‌اندازی ربات و سرور Outline کامل شد. سرویس به صورت خودکار اجرا شده است."
-
-# استخراج مقادیر certSha256 و apiUrl از فایل access.txt با استفاده از دامنه Cloudflare Tunnel
-CERT_SHA256=$(grep "certSha256:" /opt/outline/access.txt | cut -d':' -f2)
-API_PORT=$(grep "apiUrl:" /opt/outline/access.txt | awk -F':' '{print $4}')
-TUNNEL_DOMAIN=$(cat /opt/outline_bot/tunnel_domain.txt)
-OUTLINE_API_URL="https://$TUNNEL_DOMAIN:$API_PORT"
