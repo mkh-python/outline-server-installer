@@ -120,24 +120,26 @@ systemctl daemon-reload 2>/dev/null || true
 systemctl reset-failed 2>/dev/null || true
 
 # ------------------------------------------------------------
-# حذف کران‌جاب‌های قبلی مربوط به ربات
-# ------------------------------------------------------------
-echo "در حال حذف کران‌جاب‌های قبلی ربات..."
-(crontab -l 2>/dev/null | grep -v "/opt/outline_bot/delete_user.py" | grep -v "outline_bot" || true) | crontab - 2>/dev/null || true
-
-# ------------------------------------------------------------
 # توقف پردازش‌های احتمالی ربات
 # ------------------------------------------------------------
+# نکته مهم:
+# از pkill -f مستقیم استفاده نمی‌کنیم، چون اگر اسکریپت با bash -c اجرا شود،
+# ممکن است متن خود اسکریپت داخل command line باشد و نصب‌کننده خودش را kill کند.
+# الگوی [/] باعث می‌شود فقط پروسه واقعی فایل اجراشده پیدا شود.
+# ------------------------------------------------------------
 echo "در حال توقف پردازش‌های احتمالی ربات..."
-pkill -f "/opt/outline_bot/outline_bot.py" 2>/dev/null || true
-pkill -f "/opt/outline_bot/delete_user.py" 2>/dev/null || true
 
-# ------------------------------------------------------------
-# حذف پوشه کامل ربات
-# ------------------------------------------------------------
-if [ -d "$BOT_DIR" ]; then
-    echo "در حال حذف پوشه $BOT_DIR ..."
-    rm -rf "$BOT_DIR"
+BOT_PIDS=$(pgrep -f "[/]opt/outline_bot/outline_bot.py" 2>/dev/null || true)
+DELETE_USER_PIDS=$(pgrep -f "[/]opt/outline_bot/delete_user.py" 2>/dev/null || true)
+
+if [ -n "$BOT_PIDS" ]; then
+    echo "در حال توقف پردازش outline_bot.py ..."
+    kill $BOT_PIDS 2>/dev/null || true
+fi
+
+if [ -n "$DELETE_USER_PIDS" ]; then
+    echo "در حال توقف پردازش delete_user.py ..."
+    kill $DELETE_USER_PIDS 2>/dev/null || true
 fi
 
 # ------------------------------------------------------------
