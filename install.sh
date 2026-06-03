@@ -2,19 +2,20 @@
 
 # ============================================================
 # نصب کامل Outline Server + ربات تلگرام مدیریت Outline
-# نسخه اصلاح‌شده ویزارد نصب
+# نسخه نصب تمیز + ویزارد مرحله‌ای
 # ============================================================
 # این فایل کارهای زیر را انجام می‌دهد:
-# 1. نصب پیش‌نیازهای سیستم
-# 2. نصب Docker
-# 3. دانلود فایل‌های ربات
-# 4. نصب Outline Server
-# 5. دریافت دامین یا IP
-# 6. استخراج apiUrl و certSha256 و API Key
-# 7. ساخت فایل .config.json
-# 8. دریافت توکن ربات، مدیرها و کانال بکاپ با ویزارد مرحله‌ای
-# 9. نصب کتابخانه‌های پایتون
-# 10. ساخت سرویس systemd
+# 1. پاک‌سازی کامل نصب قبلی ربات و Outline Server
+# 2. نصب پیش‌نیازهای سیستم
+# 3. نصب Docker
+# 4. دانلود فایل‌های ربات از GitHub
+# 5. نصب Outline Server
+# 6. دریافت دامین یا استفاده از IP
+# 7. استخراج apiUrl و certSha256 و API Key
+# 8. ساخت فایل .config.json
+# 9. دریافت توکن ربات، مدیرها و کانال بکاپ با ویزارد مرحله‌ای
+# 10. نصب کتابخانه‌های پایتون
+# 11. ساخت سرویس systemd
 # ============================================================
 
 set -Eeuo pipefail
@@ -73,6 +74,121 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # ============================================================
+# مرحله صفر: پاک‌سازی کامل نصب قبلی
+# ============================================================
+print_title "مرحله صفر: پاک‌سازی کامل نصب قبلی Outline و ربات تلگرام"
+
+echo "این عملیات موارد زیر را پاک می‌کند:"
+echo "- سرویس outline_bot"
+echo "- پوشه /opt/outline_bot"
+echo "- پوشه /opt/outline"
+echo "- کانتینرهای Docker مربوط به Outline"
+echo "- کران‌جاب‌های قبلی ربات"
+echo ""
+echo "هشدار:"
+echo "با ادامه این مرحله، کاربران قبلی، access key ها، کانفیگ قبلی و دیتای قبلی کامل پاک می‌شوند."
+echo ""
+
+read -rp "آیا از پاک‌سازی کامل و نصب مجدد مطمئن هستید؟ برای ادامه yes بنویسید: " CONFIRM_CLEAN_INSTALL
+
+if [ "$CONFIRM_CLEAN_INSTALL" != "yes" ]; then
+    echo "عملیات نصب لغو شد."
+    exit 0
+fi
+
+echo ""
+echo "شروع پاک‌سازی نصب قبلی..."
+
+# ------------------------------------------------------------
+# توقف و غیرفعال کردن سرویس ربات
+# ------------------------------------------------------------
+if systemctl list-unit-files 2>/dev/null | grep -q "^outline_bot.service"; then
+    echo "در حال توقف سرویس outline_bot..."
+    systemctl stop outline_bot.service 2>/dev/null || true
+    systemctl disable outline_bot.service 2>/dev/null || true
+fi
+
+# ------------------------------------------------------------
+# حذف فایل سرویس systemd ربات
+# ------------------------------------------------------------
+if [ -f "$SERVICE_FILE" ]; then
+    echo "در حال حذف فایل سرویس outline_bot..."
+    rm -f "$SERVICE_FILE"
+fi
+
+systemctl daemon-reload 2>/dev/null || true
+systemctl reset-failed 2>/dev/null || true
+
+# ------------------------------------------------------------
+# حذف کران‌جاب‌های قبلی مربوط به ربات
+# ------------------------------------------------------------
+echo "در حال حذف کران‌جاب‌های قبلی ربات..."
+(crontab -l 2>/dev/null | grep -v "/opt/outline_bot/delete_user.py" | grep -v "outline_bot" || true) | crontab - 2>/dev/null || true
+
+# ------------------------------------------------------------
+# توقف پردازش‌های احتمالی ربات
+# ------------------------------------------------------------
+echo "در حال توقف پردازش‌های احتمالی ربات..."
+pkill -f "/opt/outline_bot/outline_bot.py" 2>/dev/null || true
+pkill -f "/opt/outline_bot/delete_user.py" 2>/dev/null || true
+
+# ------------------------------------------------------------
+# حذف پوشه کامل ربات
+# ------------------------------------------------------------
+if [ -d "$BOT_DIR" ]; then
+    echo "در حال حذف پوشه $BOT_DIR ..."
+    rm -rf "$BOT_DIR"
+fi
+
+# ------------------------------------------------------------
+# حذف کانتینرهای Docker مربوط به Outline
+# ------------------------------------------------------------
+echo "در حال حذف کانتینرهای Docker مربوط به Outline..."
+
+if command -v docker >/dev/null 2>&1; then
+    docker rm -f shadowbox 2>/dev/null || true
+    docker rm -f watchtower 2>/dev/null || true
+
+    OUTLINE_CONTAINERS=$(docker ps -aq --filter "name=shadowbox" --filter "name=watchtower" 2>/dev/null || true)
+
+    if [ -n "$OUTLINE_CONTAINERS" ]; then
+        docker rm -f $OUTLINE_CONTAINERS 2>/dev/null || true
+    fi
+
+    echo "در حال حذف ایمیج‌های Docker مربوط به Outline..."
+
+    OUTLINE_IMAGES=$(docker images --format "{{.Repository}}:{{.Tag}} {{.ID}}" 2>/dev/null | grep -Ei "outline|shadowbox|watchtower" | awk '{print $2}' | sort -u || true)
+
+    if [ -n "$OUTLINE_IMAGES" ]; then
+        docker rmi -f $OUTLINE_IMAGES 2>/dev/null || true
+    fi
+
+    echo "در حال پاک‌سازی Docker network های بدون استفاده..."
+    docker network prune -f 2>/dev/null || true
+
+    echo "در حال پاک‌سازی Docker volume های بدون استفاده..."
+    docker volume prune -f 2>/dev/null || true
+else
+    print_warning "Docker هنوز نصب نیست یا در دسترس نیست؛ پاک‌سازی Docker رد شد."
+fi
+
+# ------------------------------------------------------------
+# حذف پوشه کامل Outline Server
+# ------------------------------------------------------------
+if [ -d /opt/outline ]; then
+    echo "در حال حذف پوشه /opt/outline ..."
+    rm -rf /opt/outline
+fi
+
+# ------------------------------------------------------------
+# حذف فایل‌های لاگ قدیمی احتمالی
+# ------------------------------------------------------------
+rm -f /var/log/outline_bot.log 2>/dev/null || true
+
+print_success "پاک‌سازی نصب قبلی کامل شد."
+echo ""
+
+# ============================================================
 # مرحله 1: آپدیت سیستم و نصب پیش‌نیازها
 # ============================================================
 print_title "مرحله 1: نصب پیش‌نیازهای سیستم"
@@ -105,7 +221,6 @@ mkdir -p "$VENV_DIR"
 python3 -m venv "$VENV_DIR"
 
 # فعال‌سازی محیط مجازی پایتون
-# این محیط فقط برای نصب کتابخانه‌ها و اجرای ربات استفاده می‌شود.
 source "$VENV_DIR/bin/activate"
 
 print_success "محیط مجازی پایتون ساخته شد."
@@ -117,29 +232,18 @@ print_title "مرحله 4: دانلود فایل‌های ربات"
 
 cd "$BOT_DIR"
 
-# ------------------------------------------------------------
-# دانلود فایل‌ها با -O برای اینکه اگر فایل قبلاً وجود داشت،
-# فایل جدید دقیقاً جایگزین همان فایل شود و فایل .1 ساخته نشود.
-# ------------------------------------------------------------
 wget -q -O outline_bot.py "$REPO_BASE_URL/outline_bot.py"
 wget -q -O delete_user.py "$REPO_BASE_URL/delete_user.py"
+wget -q -O users_data.json "$REPO_BASE_URL/users_data.json"
 wget -q -O update.sh "$REPO_BASE_URL/update.sh"
 wget -q -O README.md "$REPO_BASE_URL/README.md"
 wget -q -O version.txt "$REPO_BASE_URL/version.txt"
 wget -q -O install.sh "$REPO_BASE_URL/install.sh"
 
 # ------------------------------------------------------------
-# users_data.json فقط اگر وجود نداشت ساخته یا دانلود می‌شود
-# تا اطلاعات کاربران قبلی در نصب مجدد پاک نشود.
-# ------------------------------------------------------------
-if [ ! -f "$BOT_DIR/users_data.json" ]; then
-    wget -q -O users_data.json "$REPO_BASE_URL/users_data.json" || echo '{"next_id": 1, "users": {}}' > users_data.json
-fi
-
-# ------------------------------------------------------------
 # بررسی فایل‌های ضروری
 # ------------------------------------------------------------
-if [ ! -f "outline_bot.py" ] || [ ! -f "delete_user.py" ] || [ ! -f "update.sh" ]; then
+if [ ! -f "outline_bot.py" ] || [ ! -f "delete_user.py" ] || [ ! -f "users_data.json" ] || [ ! -f "update.sh" ]; then
     print_error "خطا در دانلود فایل‌های ربات. لطفاً اتصال اینترنت یا آدرس GitHub را بررسی کنید."
     exit 1
 fi
@@ -177,10 +281,10 @@ fi
 
 # ------------------------------------------------------------
 # استخراج apiUrl و certSha256 از access.txt
-# این بخش دو مدل خروجی را پشتیبانی می‌کند:
-# 1. خروجی JSON مثل:
+# دو مدل خروجی پشتیبانی می‌شود:
+# 1. JSON:
 #    {"apiUrl":"https://IP:PORT/API_KEY","certSha256":"HASH"}
-# 2. خروجی متنی شامل apiUrl و certSha256
+# 2. متن معمولی شامل apiUrl و certSha256
 # ------------------------------------------------------------
 ACCESS_JSON=$(grep -o '{.*}' "$ACCESS_FILE" | tail -n 1 || true)
 
@@ -270,7 +374,7 @@ while true; do
 
         if [ "$DOMAIN_IP" = "$SERVER_IP" ]; then
             print_success "دامین با IP سرور هماهنگ است."
-            
+
             # ------------------------------------------------
             # حفظ پورت و API Key از apiUrl اصلی Outline
             # فقط هاست/IP با دامین جایگزین می‌شود.
@@ -453,9 +557,8 @@ print_success "اطلاعات ربات با موفقیت دریافت شد."
 print_title "مرحله 9: ساخت فایل تنظیمات ربات"
 
 # ------------------------------------------------------------
-# نکته مهم:
 # BACKUP_CHANNEL_ID اگر null باشد به صورت JSON null ذخیره می‌شود.
-# اگر عدد کانال خصوصی باشد به صورت رشته ذخیره می‌شود تا در ربات بدون مشکل خوانده شود.
+# اگر عدد کانال خصوصی باشد به صورت رشته ذخیره می‌شود.
 # ------------------------------------------------------------
 if [ "$BACKUP_CHANNEL_ID" = "null" ]; then
     BACKUP_CHANNEL_ID_JSON="null"
@@ -580,9 +683,7 @@ print_title "مرحله 13: تنظیم Cron حذف کاربران منقضی‌�
 
 CRON_COMMAND="0 0 * * * $VENV_DIR/bin/python3 $BOT_DIR/delete_user.py"
 
-# ------------------------------------------------------------
-# جلوگیری از ثبت تکراری cron job در نصب مجدد
-# ------------------------------------------------------------
+# جلوگیری از ثبت تکراری cron job
 (crontab -l 2>/dev/null | grep -v "$BOT_DIR/delete_user.py" || true; echo "$CRON_COMMAND") | crontab -
 
 print_success "Cron حذف کاربران منقضی‌شده تنظیم شد."
