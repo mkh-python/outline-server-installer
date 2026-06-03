@@ -2,7 +2,7 @@
 
 # ============================================================
 # نصب کامل Outline Server + ربات تلگرام مدیریت Outline
-# نسخه نصب تمیز + ویزارد مرحله‌ای
+# نسخه نصب تمیز + ویزارد مرحله‌ای + پاک‌سازی امن
 # ============================================================
 # این فایل کارهای زیر را انجام می‌دهد:
 # 1. پاک‌سازی کامل نصب قبلی ربات و Outline Server
@@ -89,9 +89,10 @@ echo "هشدار:"
 echo "با ادامه این مرحله، کاربران قبلی، access key ها، کانفیگ قبلی و دیتای قبلی کامل پاک می‌شوند."
 echo ""
 
-read -rp "آیا از پاک‌سازی کامل و نصب مجدد مطمئن هستید؟ برای ادامه yes بنویسید: " CONFIRM_CLEAN_INSTALL
+read -rp "آیا از پاک‌سازی کامل و نصب مجدد مطمئن هستید؟ برای ادامه y یا yes بنویسید: " CONFIRM_CLEAN_INSTALL
+CONFIRM_CLEAN_INSTALL=$(echo "$CONFIRM_CLEAN_INSTALL" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
 
-if [ "$CONFIRM_CLEAN_INSTALL" != "yes" ]; then
+if [[ "$CONFIRM_CLEAN_INSTALL" != "yes" && "$CONFIRM_CLEAN_INSTALL" != "y" ]]; then
     echo "عملیات نصب لغو شد."
     exit 0
 fi
@@ -120,6 +121,12 @@ systemctl daemon-reload 2>/dev/null || true
 systemctl reset-failed 2>/dev/null || true
 
 # ------------------------------------------------------------
+# حذف کران‌جاب‌های قبلی مربوط به ربات
+# ------------------------------------------------------------
+echo "در حال حذف کران‌جاب‌های قبلی ربات..."
+(crontab -l 2>/dev/null | grep -v "/opt/outline_bot/delete_user.py" | grep -v "outline_bot" || true) | crontab - 2>/dev/null || true
+
+# ------------------------------------------------------------
 # توقف پردازش‌های احتمالی ربات
 # ------------------------------------------------------------
 # نکته مهم:
@@ -140,6 +147,29 @@ fi
 if [ -n "$DELETE_USER_PIDS" ]; then
     echo "در حال توقف پردازش delete_user.py ..."
     kill $DELETE_USER_PIDS 2>/dev/null || true
+fi
+
+sleep 1
+
+BOT_PIDS_FORCE=$(pgrep -f "[/]opt/outline_bot/outline_bot.py" 2>/dev/null || true)
+DELETE_USER_PIDS_FORCE=$(pgrep -f "[/]opt/outline_bot/delete_user.py" 2>/dev/null || true)
+
+if [ -n "$BOT_PIDS_FORCE" ]; then
+    echo "پردازش outline_bot.py هنوز فعال است؛ توقف اجباری..."
+    kill -9 $BOT_PIDS_FORCE 2>/dev/null || true
+fi
+
+if [ -n "$DELETE_USER_PIDS_FORCE" ]; then
+    echo "پردازش delete_user.py هنوز فعال است؛ توقف اجباری..."
+    kill -9 $DELETE_USER_PIDS_FORCE 2>/dev/null || true
+fi
+
+# ------------------------------------------------------------
+# حذف پوشه کامل ربات
+# ------------------------------------------------------------
+if [ -d "$BOT_DIR" ]; then
+    echo "در حال حذف پوشه $BOT_DIR ..."
+    rm -rf "$BOT_DIR"
 fi
 
 # ------------------------------------------------------------
